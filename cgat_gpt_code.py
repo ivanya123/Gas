@@ -1,6 +1,6 @@
 import asyncio
 import csv
-from datetime import datetime
+
 from tinkoff.invest import (
     AsyncClient,
     MarketDataRequest,
@@ -9,14 +9,16 @@ from tinkoff.invest import (
     CandleInstrument,
     SubscriptionInterval,
     Quotation,
-    InstrumentIdType,
+    InstrumentIdType, SubscribeOrderBookRequest, OrderBookInstrument, OrderBook, Candle,
 )
+
 from CONSTANTS import TOKEN, CLASS_CODE
+
 TOKEN = TOKEN
 FIGI = "FUTNG1224000"  # FIGI фьючерса
 TICKER = "NGZ4"  # Тикер фьючерса
 CLASS_CODE = "SPBFUT"  # Класс кода для фьючерсов на Мосбирже
-UID='2f52fac0-36a0-4e7c-82f4-2f87beed762f'
+UID = '2f52fac0-36a0-4e7c-82f4-2f87beed762f'
 
 
 def to_price(quotation: Quotation) -> float:
@@ -58,15 +60,20 @@ async def main():
     lock = asyncio.Lock()
 
     async def request_iterator():
+        # Сначала подписка на свечи
         yield MarketDataRequest(
             subscribe_candles_request=SubscribeCandlesRequest(
                 subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
+                waiting_close=True,
                 instruments=[
-                    CandleInstrument(
-                        figi=FIGI,
-                        interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-                    )
-                ],
+                    CandleInstrument(figi=FIGI, interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE)]
+            )
+        )
+        # Затем подписка на стакан
+        yield MarketDataRequest(
+            subscribe_order_book_request=SubscribeOrderBookRequest(
+                subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
+                instruments=[OrderBookInstrument(figi=FIGI, depth=40, instrument_id=UID)]
             )
         )
         while True:
@@ -92,13 +99,18 @@ async def main():
 
         # Открываем CSV файл для записи данных
         with open('futures_price_data.csv', mode='w', newline='') as csv_file:
-            fieldnames = ['datetime', 'price']
+            fieldnames = list(OrderBook.__annotations__.keys())
+            fieldnames.extend(list(Candle.__annotations__.keys()))
+            fieldnames = list(set(fieldnames))
             writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
             writer.writeheader()
-
+            orderbook = None
             async for marketdata in client.market_data_stream.market_data_stream(
                     request_iterator()
             ):
+                if marketdata.orderbook:
+                    orderbook: OrderBook = marketdata.orderbook
+
                 if marketdata.candle:
                     # Получаем время и цену
                     candle_time = marketdata.candle.time
@@ -110,14 +122,16 @@ async def main():
 
                     price_in_rubles = (price / min_increment) * current_min_price_amount
 
+                    dict_row = marketdata.candle.__dict__
+                    dict_row.update(orderbook.__dict__)
+                    # print(dict_row)
+
                     # Записываем данные в CSV файл
-                    writer.writerow({
-                        'datetime': candle_time,
-                        'price': price_in_rubles
-                    })
+                    writer.writerow(dict_row)
 
                     # Выводим информацию
-                    print(f"Время: {candle_time}, Цена фьючерса в рублях: {price_in_rubles}")
+                    print(
+                        f"Время: {candle_time}, Цена фьючерса в рублях: {price_in_rubles}, Стакан: {orderbook.limit_up if orderbook else None}")
 
         # Отменяем задачу обновления при завершении
         update_task.cancel()
