@@ -9,10 +9,10 @@ from tinkoff.invest import (
     CandleInstrument,
     SubscriptionInterval,
     Quotation,
-    InstrumentIdType, SubscribeOrderBookRequest, OrderBookInstrument, OrderBook, Candle,
-)
+    InstrumentIdType, SubscribeOrderBookRequest, OrderBookInstrument, OrderBook, )
 
 from CONSTANTS import TOKEN, CLASS_CODE
+from function_processing import create_dict_row_from_response
 
 TOKEN = TOKEN
 FIGI = "FUTNG1224000"  # FIGI фьючерса
@@ -99,11 +99,8 @@ async def main():
 
         # Открываем CSV файл для записи данных
         with open('futures_price_data.csv', mode='w', newline='') as csv_file:
-            fieldnames = list(OrderBook.__annotations__.keys())
-            fieldnames.extend(list(Candle.__annotations__.keys()))
-            fieldnames = list(set(fieldnames))
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            writer.writeheader()
+
+            first_iteration = True
             orderbook = None
             async for marketdata in client.market_data_stream.market_data_stream(
                     request_iterator()
@@ -111,27 +108,23 @@ async def main():
                 if marketdata.orderbook:
                     orderbook: OrderBook = marketdata.orderbook
 
-                if marketdata.candle:
-                    # Получаем время и цену
-                    candle_time = marketdata.candle.time
-                    price = to_price(marketdata.candle.close)
-
+                if candle := marketdata.candle:
                     # Получаем актуальное значение min_price_amount
+
+
                     async with lock:
                         current_min_price_amount = shared_data['min_price_amount']
 
-                    price_in_rubles = (price / min_increment) * current_min_price_amount
+                    dict_row = create_dict_row_from_response(candle, orderbook)
+                    if first_iteration:
+                        first_iteration = False
+                        writer = csv.DictWriter(csv_file, fieldnames=dict_row.keys())
 
-                    dict_row = marketdata.candle.__dict__
-                    dict_row.update(orderbook.__dict__)
-                    # print(dict_row)
 
                     # Записываем данные в CSV файл
                     writer.writerow(dict_row)
+                    print(dict_row)
 
-                    # Выводим информацию
-                    print(
-                        f"Время: {candle_time}, Цена фьючерса в рублях: {price_in_rubles}, Стакан: {orderbook.limit_up if orderbook else None}")
 
         # Отменяем задачу обновления при завершении
         update_task.cancel()
