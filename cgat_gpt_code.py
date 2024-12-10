@@ -1,5 +1,7 @@
 import asyncio
 import csv
+from datetime import datetime
+from decimal import Decimal
 
 from tinkoff.invest import (
     AsyncClient,
@@ -110,21 +112,23 @@ async def main():
 
                 if candle := marketdata.candle:
                     # Получаем актуальное значение min_price_amount
-
-
                     async with lock:
                         current_min_price_amount = shared_data['min_price_amount']
 
                     dict_row = create_dict_row_from_response(candle, orderbook)
+                    for key, value in dict_row.items():
+                        if isinstance(value, Decimal):
+                            dict_row[key] = float(value)
+                        if isinstance(value, datetime):
+                            dict_row[key] = value.strftime("%Y-%m-%d %H:%M:%S")
                     if first_iteration:
                         first_iteration = False
                         writer = csv.DictWriter(csv_file, fieldnames=dict_row.keys())
-
+                        writer.writeheader()
 
                     # Записываем данные в CSV файл
                     writer.writerow(dict_row)
                     print(dict_row)
-
 
         # Отменяем задачу обновления при завершении
         update_task.cancel()

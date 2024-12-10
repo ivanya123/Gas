@@ -36,16 +36,18 @@ def create_dict_from_candle(candle: Candle):
 def create_dict_from_orderbook(orderbook: OrderBook):
     volume_order = sum([quotation_to_decimal(bids.price)*bids.quantity for bids in orderbook.bids])
     volume_asks = sum([quotation_to_decimal(asks.price)*asks.quantity for asks in orderbook.asks])
+    bids_count = sum([bids.quantity for bids in orderbook.bids])
+    asks_count = sum([asks.quantity for asks in orderbook.asks])
     return {
         'figi': orderbook.figi,
         'depth': orderbook.depth,
-        'bids': orderbook.bids,
+        'bids_count': bids_count,
         'volume_order': volume_order,
-        'asks': orderbook.asks,
+        'asks_count': asks_count,
         'volume_asks': volume_asks,
         'time_orderbook': orderbook.time,
-        'limit_up': orderbook.limit_up,
-        'limit_down': orderbook.limit_down,
+        'limit_up': quotation_to_decimal(orderbook.limit_up),
+        'limit_down': quotation_to_decimal(orderbook.limit_down),
         'instrument_uid': orderbook.instrument_uid,
     }
 
