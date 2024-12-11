@@ -13,7 +13,7 @@ from tinkoff.invest import (
     Quotation,
     InstrumentIdType, SubscribeOrderBookRequest, OrderBookInstrument, OrderBook, )
 
-from CONSTANTS import TOKEN, CLASS_CODE
+from CONSTANTS import TOKEN
 from function_processing import create_dict_row_from_response
 
 TOKEN = TOKEN
