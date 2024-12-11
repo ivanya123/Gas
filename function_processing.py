@@ -54,9 +54,9 @@ def create_dict_from_orderbook(orderbook: OrderBook):
 
 def create_dict_row_from_response(candle: Candle, orderbook: OrderBook) -> dict[str, str | int]:
     '''
-    Создание словаря для записи в базу данных или файл из ответа по получение свечей и стакана при торговли!!
+    Создание словаря для записи в базу данных или файл из ответа по получение свечей и стакана при торговле!!
     :param candle: Candle - свеча
-    :param orderbook: OrderBook - стакан к закрытию свечи.
+    :param orderbook: OrderBook - последний сформированный стакан к закрытию свечи.
     :return:
     '''
     candle_dict = create_dict_from_candle(candle)
