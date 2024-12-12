@@ -1,40 +1,23 @@
-import asyncio
-import os
+import pandas as pd
+import matplotlib.pyplot as plt
 
-from tinkoff.invest import (
-    AsyncClient,
-    CandleInstrument,
-    MarketDataRequest,
-    SubscribeCandlesRequest,
-    SubscriptionAction,
-    SubscriptionInterval,
-)
-
-TOKEN = os.environ["INVEST_TOKEN"]
+from data_proc import create_signal_reversal, create_lag_features
 
 
-async def main():
-    async def request_iterator():
-        yield MarketDataRequest(
-            subscribe_candles_request=SubscribeCandlesRequest(
-                subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
-                instruments=[
-                    CandleInstrument(
-                        figi="BBG004730N88",
-                        interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-                    )
-                ],
-            )
-        )
-        while True:
-            await asyncio.sleep(1)
-
-    async with AsyncClient(TOKEN) as client:
-        async for marketdata in client.market_data_stream.market_data_stream(
-            request_iterator()
-        ):
-            print(marketdata)
+df = pd.read_csv('candles.csv')
+df['time'] = pd.to_datetime(df['time'], format='%Y-%m-%d %H:%M:%S+00:00')
+df = df.sort_values(by='time').reset_index(drop=True)
+df = create_signal_reversal(df.head(24), threshold=0.0015)
+print(df)
+# print(df[df['signal_reversal'] == 1])
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+fig, ax = plt.subplots()
+ax.plot(df['time'], df['close'])
+ax.plot(df['time'], df['sma'])
+
+entry = df[df['signal_reversal'] == 1]
+
+ax.scatter(entry['time'], entry['close'])
+
+plt.show()

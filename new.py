@@ -1,20 +1,14 @@
 import asyncio
 import datetime
-import json
-import pandas as pd
 
-from tinkoff.invest.utils import now
+import pandas as pd
 from tinkoff.invest import (
     AsyncClient,
-    CandleInstrument,
-    MarketDataRequest,
-    SubscribeCandlesRequest,
-    SubscriptionAction,
-    SubscriptionInterval, Quotation, CandleInterval
+    Quotation, CandleInterval
 )
+from tinkoff.invest.utils import now
 
-from CONSTANTS import TOKEN, CLASS_CODE
-from function_processing import get_increment_amount, get_instrument_info
+from CONSTANTS import TOKEN
 
 min_increment = 0.001
 min_price_amount = 1
@@ -26,14 +20,15 @@ def to_price(quotation: Quotation):
 
 
 async def main():
-
     async with AsyncClient(TOKEN) as client:
         candle_list = []
         async for candle in client.get_all_candles(
                 instrument_id='2f52fac0-36a0-4e7c-82f4-2f87beed762f',
                 from_=now() - datetime.timedelta(days=365),
+                to=now(),
                 interval=CandleInterval.CANDLE_INTERVAL_HOUR
-        ):
+            ):
+            print(candle.time)
             row = {
                 'time': candle.time,
                 'open': to_price(candle.open),
@@ -46,6 +41,7 @@ async def main():
         else:
             df = pd.DataFrame(candle_list)
             df.to_csv('candles.csv', index=False)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

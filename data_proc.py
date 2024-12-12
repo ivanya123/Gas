@@ -1,5 +1,5 @@
+import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 
 def create_lag_features(data: pd.DataFrame, columns: list, forward_lags: int = 5,
@@ -38,34 +38,35 @@ def create_lag_features(data: pd.DataFrame, columns: list, forward_lags: int = 5
     return df
 
 
-# Пример использования
-df_with_lags = pd.read_csv('candles.csv')
-df_with_lags['time'] = pd.to_datetime(df_with_lags['time'])
-df_with_lags = df_with_lags.sort_values('time').reset_index(drop=True)
+def create_signal_reversal(data: pd.DataFrame, window: int = 5, threshold: float = 0.01):
+    """
+    Создаёт целевое значение для предсказания момента изменения тренда.
+    1 означает, что на этой свече произошла смена направления тренда.
+    0 - иначе.
 
-# Допустим, у нас есть столбцы ['open', 'high', 'low', 'close', 'volume']
-feature_columns = ['open', 'high', 'low', 'close', 'volume']
+    Параметры:
+    - df: DataFrame с колонкой 'close'
+    - window: размер окна для сглаживания (скользящее среднее)
+    - threshold: порог для отсечения шума (например, 0.5%)
+      Если изменение тренда происходит без существенного изменения цены,
+      считаем, что это шум и не ставим сигнал.
 
-df_with_lags = create_lag_features(df_with_lags, feature_columns, forward_lags=5, backward_lags=5)
-print(df_with_lags[df_with_lags['signal'] == 1])
-
-fig, ax = plt.subplots(figsize=(12, 6))
-
-ax.plot(df_with_lags['time'], df_with_lags['close'], label='Close Price', color='blue')
-
-# Фильтруем строки, где есть сигнал
-entry_points = df_with_lags[df_with_lags['signal'] == 1]
-
-# Добавляем вертикальные линии в точках входа
-# Можно использовать ax.axvline, если хотим рисовать для каждой точки
-for _, row in entry_points.iterrows():
-    ax.axvline(x=row['time'], color='red', linestyle='--', alpha=0.7)
-
-# Дополнительные настройки:
-ax.set_title('Close Price with Entry Points')
-ax.set_xlabel('Time')
-ax.set_ylabel('Price')
-ax.legend()
-
-plt.tight_layout()
-plt.show()
+    Предполагается, что df отсортирован по времени.
+    """
+    df = data.copy()
+    df = df.sort_values('time').reset_index(drop=True)
+    print(df['time'])
+    df['sma'] = df['close'].rolling(window, center=True, min_periods=1).mean()
+    df['diff'] = df['sma'].diff()
+    df['diff_abs_pct'] = df['diff'].abs() / df['sma']
+    df['trend_dir'] = np.sign(df['diff'])
+    # В разворотах signal_reversal=1, когда trend_dir меняется и изменение цены выше threshold
+    # Например:
+    df['signal_reversal'] = 0
+    for i in range(1, len(df)):
+        if df.loc[i - 1, 'trend_dir'] != 0 and df.loc[i, 'trend_dir'] != 0:
+            if df.loc[i - 1, 'trend_dir'] != df.loc[i, 'trend_dir']:
+                # Проверяем величину изменения
+                if df.loc[i, 'diff_abs_pct'] > threshold:
+                    df.loc[i, 'signal_reversal'] = 1
+    return df
