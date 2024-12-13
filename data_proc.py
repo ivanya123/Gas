@@ -55,7 +55,6 @@ def create_signal_reversal(data: pd.DataFrame, window: int = 5, threshold: float
     """
     df = data.copy()
     df = df.sort_values('time').reset_index(drop=True)
-    print(df['time'])
     df['sma'] = df['close'].rolling(window, center=True, min_periods=1).mean()
     df['diff'] = df['sma'].diff()
     df['diff_abs_pct'] = df['diff'].abs() / df['sma']
