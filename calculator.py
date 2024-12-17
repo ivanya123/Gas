@@ -28,6 +28,5 @@ def calculator(expression: str) -> float:
             raise ValueError("Нужно ввести число")
 
 
-
 if __name__ == '__main__':
     print(calculator(input('Expression: ')))
