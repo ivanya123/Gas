@@ -13,7 +13,7 @@ def small_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 df = pd.read_csv('candles.csv')
 df['time'] = pd.to_datetime(df['time'], format='%Y-%m-%d %H:%M:%S+00:00')
 df = df.sort_values(by='time').reset_index(drop=True)
-df = create_signal_reversal(df, threshold=0.002)
+df = create_signal_reversal(df, threshold=0.001, window=3)
 
 for small_df in small_dataframe(df):
     fig, ax = plt.subplots()
@@ -23,6 +23,13 @@ for small_df in small_dataframe(df):
     ax.scatter(entry['time'], entry['close'])
     ax.grid()
     plt.show()
+
+
+
+
+
+
+
 # print(df[df['signal_reversal'] == 1])
 
 

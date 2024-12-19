@@ -67,5 +67,5 @@ def create_signal_reversal(data: pd.DataFrame, window: int = 5, threshold: float
             if df.loc[i - 1, 'trend_dir'] != df.loc[i, 'trend_dir']:
                 # Проверяем величину изменения
                 if df.loc[i, 'diff_abs_pct'] > threshold:
-                    df.loc[i, 'signal_reversal'] = 1
+                    df.loc[i-1, 'signal_reversal'] = 1
     return df
