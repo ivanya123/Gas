@@ -26,14 +26,14 @@ def create_lag_features(data: pd.DataFrame, columns: list, forward_lags: int = 5
 
     df = df.dropna()
 
-    mask = (df['close_3'] > df['close_2']) & \
-           (df['close_2'] > df['close_1']) & \
-           (df['close_1'] > df['close']) & \
-           (df['close'] > df['close_-1']) & \
-           (df['close_-1'] > df['close_-2'])
-
-    df['signal'] = 0
-    df.loc[mask, 'signal'] = 1
+    # mask = (df['close_3'] > df['close_2']) & \
+    #        (df['close_2'] > df['close_1']) & \
+    #        (df['close_1'] > df['close']) & \
+    #        (df['close'] > df['close_-1']) & \
+    #        (df['close_-1'] > df['close_-2'])
+    #
+    # df['signal'] = 0
+    # df.loc[mask, 'signal'] = 1
 
     return df
 
