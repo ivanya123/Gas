@@ -19,7 +19,9 @@ def doncheana(col: pd.Series, hours: int = 20) -> list | pd.Series:
     return max_list, min_list
 
 
-
+def create_mean(x: pd.Series):
+    x = x.tolist()
+    return sum(x)/len(x)
 
 
 file_list = [pd.read_csv(x) for x in os.listdir() if x.endswith('.csv')]
@@ -33,17 +35,23 @@ for df in file_list:
     df['min_close_60'] = df['close'].rolling(window=60).min()
     df['mean_doncheana_20'] = (df['max_close'] + df['min_close'])/2
     df['mean_doncheana_60'] = (df['max_close_60'] + df['min_close_60'])/2
+    df = create_lag_features(df, forward_lags=30, columns=['close'])
+    columns = [x for x in df.columns if x.startswith('close_') and '-' not in x]
+    df['future_mean_price'] = df[columns[:5]].apply(create_mean, axis=1)
+    # print(df['future_mean_price'])
+
 
 
     # Расчет параметров каналов Дончеана
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(df.index[:], df.loc[:, 'close'])
-    ax.plot(df.index[:], df.loc[:, 'max_close'], color='r')
-    ax.plot(df.index[:], df.loc[:, 'min_close'], color='r')
-    ax.plot(df.index[:], df.loc[:, 'mean_doncheana_20'], color='b')
-    ax.plot(df.index[:], df.loc[:, 'max_close_60'], color='g')
-    ax.plot(df.index[:], df.loc[:, 'min_close_60'], color='g')
-    ax.plot(df.index[:], df.loc[:, 'mean_doncheana_60'], color='y')
-    ax.legend(['close', 'max_close', 'min_close', 'mean_doncheana_20', 'max_close_60', 'min_close_60', 'mean_doncheana_60'])
+    # ax.plot(df.index[:], df.loc[:, 'max_close'], color='r')
+    # ax.plot(df.index[:], df.loc[:, 'min_close'], color='r')
+    # ax.plot(df.index[:], df.loc[:, 'mean_doncheana_20'], color='b')
+    # ax.plot(df.index[:], df.loc[:, 'max_close_60'], color='g')
+    # ax.plot(df.index[:], df.loc[:, 'min_close_60'], color='g')
+    # ax.plot(df.index[:], df.loc[:, 'mean_doncheana_60'], color='y')
+    ax.plot(df.index[:], df.loc[:, 'future_mean_price'])
+    # ax.legend(['close', 'max_close', 'min_close', 'mean_doncheana_20', 'max_close_60', 'min_close_60', 'mean_doncheana_60'])
     plt.show()
