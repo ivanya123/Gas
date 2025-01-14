@@ -21,6 +21,7 @@ def doncheana(col: pd.Series, hours: int = 20) -> list | pd.Series:
 
 def create_mean(x: pd.Series):
     x = x.tolist()
+    print(x)
     return sum(x)/len(x)
 
 
@@ -35,10 +36,11 @@ for df in file_list:
     df['min_close_60'] = df['close'].rolling(window=60).min()
     df['mean_doncheana_20'] = (df['max_close'] + df['min_close'])/2
     df['mean_doncheana_60'] = (df['max_close_60'] + df['min_close_60'])/2
-    df = create_lag_features(df, forward_lags=30, columns=['close'])
-    columns = [x for x in df.columns if x.startswith('close_') and '-' not in x]
-    df['future_mean_price'] = df[columns[:5]].apply(create_mean, axis=1)
-    # print(df['future_mean_price'])
+    df = create_lag_features(df, backward_lags=30, columns=['close'])
+    columns = [x for x in df.columns if x.startswith('close_') and '-' in x]
+    df['future_mean_price'] = df[columns].apply(create_mean, axis=1)
+    df['percent_change'] = ((df['close'] - df['future_mean_price'])/df['close'])*100
+    # print(df[['close','future_mean_price']])
 
 
 
@@ -53,5 +55,6 @@ for df in file_list:
     # ax.plot(df.index[:], df.loc[:, 'min_close_60'], color='g')
     # ax.plot(df.index[:], df.loc[:, 'mean_doncheana_60'], color='y')
     ax.plot(df.index[:], df.loc[:, 'future_mean_price'])
-    # ax.legend(['close', 'max_close', 'min_close', 'mean_doncheana_20', 'max_close_60', 'min_close_60', 'mean_doncheana_60'])
+    ax.plot(df.index[:], df.loc[:, 'percent_change'])
+    # ax.legend(['close', 'future_mean_price'])
     plt.show()
