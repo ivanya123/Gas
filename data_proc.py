@@ -12,30 +12,25 @@ def create_lag_features(data: pd.DataFrame, columns: list, forward_lags: int = 5
     # Создадим копию, чтобы не изменять оригинал
     df = data.copy()
 
+    new_columns = []
     # Создание сдвигов назад (положительные сдвиги)
-    for i in range(1, forward_lags + 1):
-        shifted = df[columns].shift(i)
-        shifted.columns = [f"{col}_{i}" for col in shifted.columns]
-        df = pd.concat([df, shifted], axis=1)
+    if forward_lags:
+        for i in range(1, forward_lags + 1):
+            shifted = df[columns].shift(i)
+            shifted.columns = [f"{col}_{i}" for col in shifted.columns]
+            df = pd.concat([df, shifted], axis=1)
+            new_columns.extend(shifted.columns)
 
     # Создание сдвигов вперёд (отрицательные сдвиги)
-    for i in range(1, backward_lags + 1):
-        shifted = df[columns].shift(-i)
-        shifted.columns = [f"{col}_{-i}" for col in shifted.columns]
-        df = pd.concat([df, shifted], axis=1)
+    if backward_lags:
+        for i in range(1, backward_lags + 1):
+            shifted = df[columns].shift(-i)
+            shifted.columns = [f"{col}_{-i}" for col in shifted.columns]
+            df = pd.concat([df, shifted], axis=1)
+            new_columns.extend(shifted.columns)
 
     df = df.dropna()
-
-    # mask = (df['close_3'] > df['close_2']) & \
-    #        (df['close_2'] > df['close_1']) & \
-    #        (df['close_1'] > df['close']) & \
-    #        (df['close'] > df['close_-1']) & \
-    #        (df['close_-1'] > df['close_-2'])
-    #
-    # df['signal'] = 0
-    # df.loc[mask, 'signal'] = 1
-
-    return df
+    return df, new_columns
 
 
 def create_signal_reversal(data: pd.DataFrame, window: int = 5, threshold: float = 0.01):
