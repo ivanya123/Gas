@@ -273,11 +273,20 @@ if __name__ == '__main__':
 
     for file in list_file:
         data = pd.read_csv(file)
-        win_rate_list = []
+        profit_list = []
+        win__rate_list = []
+        trade_list = []
         for n in range(5, 40):
             df, total_trades, profit, win_rate = realization_strategy_donchian(data, n, 200, 0.05, 0.01)
-            win_rate_list.append(profit)
-        plt.plot(range(5, 40), win_rate_list)
+            profit_list.append(profit)
+            win__rate_list.append(win_rate)
+            trade_list.append(total_trades)
+        fig, ax = plt.subplots()
+        ax1 = ax.twinx()
+        # ax2 = ax.twinx()
+        ax.plot(range(5, 40), profit_list)
+        ax1.plot(range(5, 40), win__rate_list, color='red')
+        # ax2.plot(range(5, 40), trade_list, color='blue')
         plt.xlabel('Donchian Period')
         plt.ylabel('Total profit')
         plt.title(f'Donchian Strategy Win Rate - {file.replace('.csv', '')}')
