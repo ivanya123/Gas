@@ -31,10 +31,14 @@ for i, file in enumerate(list_file):
         last_price = full_data.loc[full_data['time'] == last_date, 'close'].iloc[0]
 
         # Первая цена текущего контракта
-        first_price = data[data['time'] > last_date]['close'].min()
+        try:
+            first_price = data[data['time'] > last_date]['close'].iloc[0]
+        except:
+            break
 
         # Рассчитываем разницу для коррекции
-        price_adjustment += last_price - first_price
+        price_adjustment = last_price - first_price
+        print(price_adjustment)
 
         # Корректируем цены текущего контракта
         data['close'] += price_adjustment
