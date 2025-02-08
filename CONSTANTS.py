@@ -1,2 +1,0 @@
-TOKEN='t.E7egvb6-Bzm5e0QyrlCKuynyMC4x4M6iBp2X_Os18qAwS-qZTaMNxkxA8x6z2EgX3E9AB3kx-OiAEhVls31uMA'
-#NGF4
