@@ -14,7 +14,7 @@ from tinkoff.invest import (
     SubscriptionInterval, Quotation, CandleInterval
 )
 
-from CONSTANTS import TOKEN
+from config import TOKEN
 from function_processing import get_increment_amount, get_instrument_info
 
 min_increment = 0.001

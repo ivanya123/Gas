@@ -9,7 +9,7 @@ from tinkoff.invest import (
     SubscriptionAction,
     SubscriptionInterval,
 )
-from CONSTANTS import TOKEN
+from config import TOKEN
 TOKEN = TOKEN
 
 

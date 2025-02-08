@@ -1,7 +1,7 @@
 from tinkoff.invest.sandbox.client import SandboxClient
 import pprint
 
-from CONSTANTS import TOKEN
+from config import TOKEN
 import os
 
 from tinkoff.invest import Client

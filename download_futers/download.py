@@ -16,7 +16,7 @@ from tinkoff.invest import (
     InstrumentStatus, )
 from tinkoff.invest.utils import now
 
-from CONSTANTS import TOKEN
+from config import TOKEN
 from function_processing import create_dict_row_from_response
 
 
