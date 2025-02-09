@@ -20,7 +20,7 @@ class HistoricInstrument:
         """Конструктор класса
         :param list_candles: список исторических свечей
         :param instrument: объект класса Future - хранение основной информации об инструменте
-        :param from_csv: флаг, если True, то данные будут загружаются из csv(реализуется в методе from_csv)"""
+        :param from_csv: флаг, если True, то данные будут загружаются из csv"""
 
         df = []
         if not from_csv:
@@ -63,3 +63,6 @@ class HistoricInstrument:
                 if isinstance(value, BrandData):
                     instrument_dict[key] = value.__dict__
             json.dump(instrument_dict, file, indent=4)
+
+    def __call__(self):
+        return self.data, self.instrument_info
