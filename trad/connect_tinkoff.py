@@ -56,7 +56,7 @@ class ConnectTinkoff:
         async with AsyncClient(self.token) as client:
             all_futures: FuturesResponse = await client.instruments.futures()
             instrument: Future = [x for x in all_futures.instruments if x.ticker == ticker][0]
-            response = []
+            response: list[HistoricCandle] = []
             async for candle in client.get_all_candles(
                     instrument_id=instrument.uid,
                     to=instrument.expiration_date,
@@ -78,6 +78,9 @@ class ConnectTinkoff:
         self.listen = asyncio.create_task(self._listen_stream())
 
     async def _listen_stream(self) -> None:
+        """
+        Слушает сообщения из стриминга.
+        """
         if self.market_data_stream is None:
             return
         if self.market_data_stream:
@@ -87,9 +90,13 @@ class ConnectTinkoff:
                     print(f'Last price: {msg.last_price}')
                 if msg.candle:
                     print(f'Candle: {msg.candle}')
-                await asyncio.sleep(1)
 
     async def add_subscribe(self, instrument_id):
+        """
+        Добавляет подписку на свечи по id инструмента.
+        :param instrument_id: str - Идентификатор инструмента.
+        :return:
+        """
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
 
@@ -97,9 +104,18 @@ class ConnectTinkoff:
             instrument_id=instrument_id,
             interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
         )
-        self.market_data_stream.candles.subscribe(
-            instruments=[instrument]
+        self.market_data_stream.candles.subscribe(instruments=[instrument])
+
+    async def delete_subscribe(self, instrument_id):
+        print(f'Удаляем подписку на свечи {instrument_id}')
+        if not self.market_data_stream:
+            raise Exception("Не создан стриминг. Вызовите connect() сначала.")
+
+        instrument = CandleInstrument(
+            instrument_id=instrument_id,
+            interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
         )
+        self.market_data_stream.candles.unsubscribe(instruments=[instrument])
 
     async def disconnect(self):
         if self.market_data_stream:
@@ -107,51 +123,20 @@ class ConnectTinkoff:
             self.market_data_stream = None
             await self._client.__aexit__(None, None, None)
 
-    async def subscribe_futures(self, instrument_id):
-        async with AsyncClient(self.token) as client:
-            print(client)
-            market_data_stream: AsyncMarketDataStreamManager = client.create_market_data_stream()
-            market_data_stream.last_price.subscribe(
-                instruments=[
-                    LastPriceInstrument(
-                        instrument_id=instrument_id,
-                    )
-                ])
-            market_data_stream.candles.subscribe(
-                instruments=[
-                    CandleInstrument(
-                        instrument_id=instrument_id,
-                        interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-                    )
-                ])
-            async for msg in market_data_stream:
-                print(msg)
-                if msg.last_price:
-                    print(f'Last price: {msg.last_price}')
-                if msg.candle:
-                    print(f'Candle: {msg.candle}')
-
 
 if __name__ == '__main__':
     from config import TOKEN
 
-
-    # connect = ConnectTinkoff(TOKEN)
-    # list_candles, instrument = asyncio.run(connect.get_candles_from_ticker('BMH5', '1h'))
-    # asyncio.run(connect.subscribe_futures(instrument.uid))
 
     async def main():
         connect = ConnectTinkoff(TOKEN)
         list_candles, instrument = await connect.get_candles_from_ticker('BMH5', '1h')
         await connect.connect()
         first = asyncio.create_task(connect.add_subscribe(instrument_id=instrument.uid))
-        for i in range(10):
-            if not connect.listen.done():
-                print('выполняется')
-                await asyncio.sleep(1)
-
-        await connect.listen
         await first
+        await asyncio.sleep(40)
+        await asyncio.create_task(connect.delete_subscribe(instrument_id=instrument.uid))
+
 
         # await connect.disconnect()
 
