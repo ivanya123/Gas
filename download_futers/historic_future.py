@@ -2,7 +2,6 @@ import datetime
 import pickle as pkl
 
 import pandas as pd
-import csv
 import json
 
 from tinkoff.invest import Future, HistoricCandle, MarketDataResponse, Quotation, MoneyValue
@@ -15,9 +14,9 @@ class HistoricInstrument:
     Класс для сохранения и загрузки исторических данныхю
     """
 
-    def __init__(self, instrument: Future, list_candles: list[HistoricCandle] = None, from_csv: bool = False,
+    def __init__(self, instrument: Future = None, list_candles: list[HistoricCandle] = None, from_csv: bool = False,
                  path: str = '') -> None:
-        """Конструктор класса
+        """Конструктор класса, вызывается либо с параметрами instriment, list_candles либо загружается из from_csv, path
         :param list_candles: список исторических свечей
         :param instrument: объект класса Future - хранение основной информации об инструменте
         :param from_csv: флаг, если True, то данные будут загружаются из csv"""
@@ -36,19 +35,21 @@ class HistoricInstrument:
                 df.append(row)
             self.data: pd.DataFrame = pd.DataFrame(df)
             self.instrument_info: Future = instrument
+            self.time_last_candle: HistoricCandle = self.data.iloc[-1]['time']
         else:
             if path:
-                with open(path + '.pkl', 'r') as file:
+                with open(path + '.pkl', 'rb') as file:
                     self.instrument_info: Future = pkl.load(file)
                 self.data: pd.DataFrame = pd.read_csv(path + '.csv')
                 self.data['time'] = pd.to_datetime(self.data['time'])
+                self.time_last_candle: pd.Timestamp = self.data.iloc[-1]['time']
             else:
                 raise ValueError('path is empty')
 
     def save_to_csv(self, path: str, *args, **kwargs):
         """Сохранение данных в csv, json и pkl, принимает стандартные параметры для метода pd.DataFrame.to_csv
         :param path: путь к файлу (без расширения)"""
-        pd.DataFrame.to_csv(self, path + '.csv', *args, **kwargs)
+        self.data.to_csv(path + '.csv', *args, **kwargs)
         with open(path + '.pkl', 'wb') as file:
             pkl.dump(self.instrument_info, file)
         instrument_dict = {}
@@ -56,13 +57,30 @@ class HistoricInstrument:
             for key, value in self.instrument_info.__dict__.items():
                 if isinstance(value, Quotation):
                     instrument_dict[key] = float(quotation_to_decimal(value))
-                if isinstance(value, datetime.datetime):
+                elif isinstance(value, datetime.datetime):
                     instrument_dict[key] = value.isoformat()
-                if isinstance(value, MoneyValue):
+                elif isinstance(value, MoneyValue):
                     instrument_dict[key] = value.__dict__
-                if isinstance(value, BrandData):
+                elif isinstance(value, BrandData):
                     instrument_dict[key] = value.__dict__
+                else:
+                    instrument_dict[key] = value
             json.dump(instrument_dict, file, indent=4)
+
+
+    def create_donchian_canal(self, long_d:int, short_d:int):
+        self.data[f'max_{long_d}_donchian'] = self.data['high'].rolling(long_d).max()
+        self.data[f'min_{long_d}_donchian'] = self.data['low'].rolling(long_d).min()
+        self.data[f'max_{short_d}_donchian'] = self.data['high'].rolling(short_d).max()
+        self.data[f'min_{short_d}_donchian'] = self.data['low'].rolling(short_d).min()
+
+        length_df = len(self.data)
+        self.max_donchian = self.data.loc[length_df - 1, f'max_{long_d}_donchian']
+        self.min_donchian = self.data.loc[length_df - 1, f'min_{long_d}_donchian']
+        self.max_short_donchian = self.data.loc[length_df - 1, f'max_{short_d}_donchian']
+        self.min_short_donchian = self.data.loc[length_df - 1, f'min_{short_d}_donchian']
+
+
 
     def __call__(self):
         return self.data, self.instrument_info

@@ -86,16 +86,12 @@ class ConnectTinkoff:
         if self.market_data_stream:
             async for msg in self.market_data_stream:
                 print(msg)
-                if msg.last_price:
-                    print(f'Last price: {msg.last_price}')
-                if msg.candle:
-                    print(f'Candle: {msg.candle}')
 
-    async def add_subscribe(self, instrument_id):
+    async def add_subscribe(self, instrument_id) -> None:
         """
         Добавляет подписку на свечи по id инструмента.
         :param instrument_id: str - Идентификатор инструмента.
-        :return:
+        :return: None
         """
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
@@ -122,6 +118,8 @@ class ConnectTinkoff:
             self.market_data_stream.stop()
             self.market_data_stream = None
             await self._client.__aexit__(None, None, None)
+
+
 
 
 if __name__ == '__main__':
