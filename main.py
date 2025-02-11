@@ -1,40 +1,13 @@
 import asyncio
-import os
-
-from tinkoff.invest import (
-    AsyncClient,
-    CandleInstrument,
-    MarketDataRequest,
-    SubscribeCandlesRequest,
-    SubscriptionAction,
-    SubscriptionInterval,
-)
-from config import TOKEN
-TOKEN = TOKEN
+from bot.telegram_bot import bot, dp
+from bot.handlers import start_router
 
 
 async def main():
-    async def request_iterator():
-        yield MarketDataRequest(
-            subscribe_candles_request=SubscribeCandlesRequest(
-                subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
-                instruments=[
-                    CandleInstrument(
-                        figi="BBG004730N88",
-                        interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-                    )
-                ],
-            )
-        )
-        while True:
-            await asyncio.sleep(1)
-
-    async with AsyncClient(TOKEN) as client:
-        async for marketdata in client.market_data_stream.market_data_stream(
-            request_iterator()
-        ):
-            print(marketdata)
+    dp.include_router(start_router)
+    # await dp.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())

@@ -1,23 +1,12 @@
 import asyncio
 import datetime
-import enum
-
-import pandas as pd
-import os
 
 from tinkoff.invest import (
     AsyncClient,
-    Quotation,
     CandleInterval,
     FuturesResponse,
-    InstrumentStatus,
-    Future, HistoricCandle, MarketDataRequest, SubscribeCandlesRequest, SubscriptionAction, CandleInstrument,
-    SubscriptionInterval, SubscribeLastPriceRequest, LastPriceInstrument)
-from tinkoff.invest.utils import now
-from tinkoff.invest.async_services import AsyncMarketDataStreamManager
-
-from function_processing import create_dict_row_from_response
-from trad.obj import DataFutures
+    Future, HistoricCandle, CandleInstrument,
+    SubscriptionInterval, )
 
 
 def string_to_interval(interval: str):
@@ -45,6 +34,7 @@ def string_to_interval(interval: str):
 class ConnectTinkoff:
     def __init__(self, token):
         self.token = token
+        self.queue = None
 
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """
@@ -74,6 +64,7 @@ class ConnectTinkoff:
         self.client = await self._client.__aenter__()
         # Создаем market data stream через клиента.
         self.market_data_stream = self.client.create_market_data_stream()
+        self.queue = asyncio.Queue()
         # Запускаем стриминг в фоне, чтобы получать сообщения
         self.listen = asyncio.create_task(self._listen_stream())
 
@@ -85,7 +76,7 @@ class ConnectTinkoff:
             return
         if self.market_data_stream:
             async for msg in self.market_data_stream:
-                print(msg)
+                self.queue.put_nowait(msg)
 
     async def add_subscribe(self, instrument_id) -> None:
         """
@@ -120,8 +111,6 @@ class ConnectTinkoff:
             await self._client.__aexit__(None, None, None)
 
 
-
-
 if __name__ == '__main__':
     from config import TOKEN
 
@@ -134,7 +123,6 @@ if __name__ == '__main__':
         await first
         await asyncio.sleep(40)
         await asyncio.create_task(connect.delete_subscribe(instrument_id=instrument.uid))
-
 
         # await connect.disconnect()
 
