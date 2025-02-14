@@ -6,7 +6,10 @@ from tinkoff.invest import (
     CandleInterval,
     FuturesResponse,
     Future, HistoricCandle, CandleInstrument,
-    SubscriptionInterval, )
+    SubscriptionInterval, LastPriceInstrument, GetAccountsResponse,
+    PortfolioResponse, FutureResponse, InfoInstrument, )
+from tinkoff.invest.async_services import AsyncServices
+from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
 
 def string_to_interval(interval: str):
@@ -34,7 +37,13 @@ def string_to_interval(interval: str):
 class ConnectTinkoff:
     def __init__(self, token):
         self.token = token
-        self.queue = None
+        self.queue: asyncio.Queue | None = None
+        self.queue_portfolio: asyncio.Queue | None = None
+        self.queue_operations: asyncio.Queue | None = None
+        self.market_data_stream: AsyncMarketDataStreamManager | None = None
+        self.listen: asyncio.Task | None = None
+        self.client: AsyncServices | None = None
+        self._client: AsyncClient | None = None
 
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """
@@ -43,18 +52,34 @@ class ConnectTinkoff:
         :param interval: str - Интервал свечи в формате ('1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d', '1w', '1M')
         :return: list[HistoricCandle], Future - Список свечей и параметры фьючерса.
         """
-        async with AsyncClient(self.token) as client:
-            all_futures: FuturesResponse = await client.instruments.futures()
-            instrument: Future = [x for x in all_futures.instruments if x.ticker == ticker][0]
-            response: list[HistoricCandle] = []
-            async for candle in client.get_all_candles(
-                    instrument_id=instrument.uid,
-                    to=instrument.expiration_date,
-                    from_=instrument.expiration_date - datetime.timedelta(days=365),
-                    interval=string_to_interval(interval)
-            ):
-                response.append(candle)
+
+        all_futures: FuturesResponse = await self.client.instruments.futures()
+        instrument: Future = [x for x in all_futures.instruments if x.ticker == ticker][0]
+        response: list[HistoricCandle] = []
+        now = datetime.datetime.now(datetime.timezone.utc)
+        async for candle in self.client.get_all_candles(
+                instrument_id=instrument.uid,
+                to=now + datetime.timedelta(days=1),
+                from_=now - datetime.timedelta(days=365),
+                interval=string_to_interval(interval)
+        ):
+            response.append(candle)
         return response, instrument
+
+    async def get_candles_from_uid(self, uid: str, interval: str | None = None) -> tuple[list[HistoricCandle], Future]:
+        instrument: FutureResponse = await self.client.instruments.future_by(id=uid, id_type=3)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        response: list[HistoricCandle] = []
+        if interval is None:
+            interval = '1m'
+        async for candle in self.client.get_all_candles(
+                instrument_id=instrument.instrument.uid,
+                to=now + datetime.timedelta(days=1),
+                from_=now - datetime.timedelta(days=365),
+                interval=string_to_interval(interval)
+        ):
+            response.append(candle)
+        return response, instrument.instrument
 
     async def connect(self):
         """
@@ -62,11 +87,9 @@ class ConnectTinkoff:
         """
         self._client = AsyncClient(self.token)
         self.client = await self._client.__aenter__()
-        # Создаем market data stream через клиента.
-        self.market_data_stream = self.client.create_market_data_stream()
-        self.queue = asyncio.Queue()
-        # Запускаем стриминг в фоне, чтобы получать сообщения
-        self.listen = asyncio.create_task(self._listen_stream())
+        self.market_data_stream: AsyncMarketDataStreamManager = self.client.create_market_data_stream()
+        self.queue: asyncio.Queue = asyncio.Queue()
+        self.listen: asyncio.Task = asyncio.create_task(self._listen_stream())
 
     async def _listen_stream(self) -> None:
         """
@@ -75,34 +98,83 @@ class ConnectTinkoff:
         if self.market_data_stream is None:
             return
         if self.market_data_stream:
-            async for msg in self.market_data_stream:
-                self.queue.put_nowait(msg)
+            try:
+                async for msg in self.market_data_stream:
+                    await self.queue.put(msg)
+            except Exception as e:
+                await self.queue.put(e)
 
-    async def add_subscribe(self, instrument_id) -> None:
+    async def add_subscribe_candle(self, instruments: list[str], interval: str | None = None) -> None:
         """
         Добавляет подписку на свечи по id инструмента.
-        :param instrument_id: str - Идентификатор инструмента.
+        :param instruments: str - Список id инструментов.
+        :param interval: str - Возможные интервалы стрима - "1m", "5m" or SUBSCRIPTION_INTERVAL_UNSPECIFIED
+        :return: None
+        """
+
+        dict_subscription_interval = {
+            '1m': SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
+            '5m': SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIVE_MINUTES
+        }
+        if interval is None:
+            interval = 'SUBSCRIPTION_INTERVAL_UNSPECIFIED'
+        if not self.market_data_stream:
+            raise Exception("Не создан стриминг. Вызовите connect() сначала.")
+
+        instruments: list[CandleInstrument] = [CandleInstrument(
+            instrument_id=instrument_id,
+            interval=dict_subscription_interval.get(interval,
+                                                    SubscriptionInterval.SUBSCRIPTION_INTERVAL_UNSPECIFIED)
+        ) for instrument_id in instruments]
+        self.market_data_stream.candles.subscribe(instruments=instruments)
+
+    async def add_subscribe_last_price(self, instruments: list[str]) -> None:
+        """
+        Добавляет подписку на цены последних сделок по id инструментов.
+        :param instruments: str - Список id инструментов.
         :return: None
         """
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
 
-        instrument = CandleInstrument(
-            instrument_id=instrument_id,
-            interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-        )
-        self.market_data_stream.candles.subscribe(instruments=[instrument])
+        instruments: list[LastPriceInstrument] = [LastPriceInstrument(instrument_id=instrument_id) for instrument_id
+                                                  in
+                                                  instruments]
 
-    async def delete_subscribe(self, instrument_id):
+        self.market_data_stream.last_price.subscribe(instruments=instruments)
+
+    async def add_subscribe_status_instrument(self, instruments_id: list[str]) -> None:
+        """
+        Добавляет подписку на статус инструмента
+        :param instruments_id: список id инструментов
+        :return:
+        """
+        if not self.market_data_stream:
+            raise Exception("Не создан стриминг. Вызовите connect() сначала.")
+
+        instruments = [InfoInstrument(instrument_id=instrument_id) for instrument_id in instruments_id]
+        self.market_data_stream.info.subscribe(instruments=instruments)
+
+    async def delete_subscribe(self, instrument_id, last_price: bool = False):
+        """
+        Удаляем подписку на свечи по инструменту
+        :param instrument_id: id инструмента
+        :param last_price: bool - Удаляем цену на последние цены сделок.
+        :return:
+        """
         print(f'Удаляем подписку на свечи {instrument_id}')
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
 
-        instrument = CandleInstrument(
-            instrument_id=instrument_id,
-            interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-        )
-        self.market_data_stream.candles.unsubscribe(instruments=[instrument])
+        if not last_price:
+            instrument = CandleInstrument(
+                instrument_id=instrument_id,
+                interval=SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE,
+            )
+            self.market_data_stream.candles.unsubscribe(instruments=[instrument])
+        else:
+            instrument = LastPriceInstrument(instrument_id=instrument_id)
+            self.market_data_stream.last_price.unsubscribe(instruments=[instrument])
 
     async def disconnect(self):
         if self.market_data_stream:
@@ -110,21 +182,63 @@ class ConnectTinkoff:
             self.market_data_stream = None
             await self._client.__aexit__(None, None, None)
 
+    async def info_accounts(self) -> list[PortfolioResponse]:
+        """
+        Получение информации о портфеле
+        :return:
+        """
+
+        if self.client:
+            accounts: GetAccountsResponse = await self.client.users.get_accounts()
+            acc: list[PortfolioResponse] = []
+            for account in accounts.accounts:
+                portfolio_data: PortfolioResponse = await self.client.operations.get_portfolio(
+                    account_id=account.id)
+                acc.append(portfolio_data)
+            return acc
+
+    async def get_portfolio_by_id(self, account_id: str) -> PortfolioResponse:
+        """
+        Получение информации о портфеле
+        :return:
+        """
+        if self.client:
+            portfolio_data: PortfolioResponse = await self.client.operations.get_portfolio(
+                account_id=account_id)
+            return portfolio_data
+
+    async def listening_portfolio_by_id(self, account_id: str):
+        """
+        Подписка на стрим для прослушивания динамической информации оь изменении портфеля
+        :return:
+        """
+        if not self.queue_portfolio:
+            self.queue_portfolio = asyncio.Queue()
+        async for portfolio_response in self.client.operations_stream.portfolio_stream(
+                accounts=[account_id]):
+            self.queue_portfolio.put_nowait(portfolio_response)
+
+    async def listening_operations_by_id(self, account_id: str):
+        """
+        Подписка и прослушивание стрима операций(сделок) портфеля.
+        :param account_id:
+        :return: None
+        """
+        if not self.queue_portfolio:
+            self.queue_portfolio = asyncio.Queue()
+        async for operations_response in self.client.operations_stream.positions_stream(
+                accounts=[account_id]):
+            self.queue_portfolio.put_nowait(operations_response)
+
 
 if __name__ == '__main__':
     from config import TOKEN
 
+    connect = ConnectTinkoff(TOKEN)
+
 
     async def main():
-        connect = ConnectTinkoff(TOKEN)
-        list_candles, instrument = await connect.get_candles_from_ticker('BMH5', '1h')
-        await connect.connect()
-        first = asyncio.create_task(connect.add_subscribe(instrument_id=instrument.uid))
-        await first
-        await asyncio.sleep(40)
-        await asyncio.create_task(connect.delete_subscribe(instrument_id=instrument.uid))
-
-        # await connect.disconnect()
+        pass
 
 
     asyncio.run(main())
