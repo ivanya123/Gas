@@ -61,14 +61,19 @@ class ConnectTinkoff:
         """
         Слушает сообщения из стриминга.
         """
+
         if self.market_data_stream is None:
             return
-        if self.market_data_stream:
+        while True:
             try:
                 async for msg in self.market_data_stream:
+                    print('Все норм')
                     await self.queue.put(msg)
             except Exception as e:
+                print(f'Ошибка при получении сообщения: {e}')
                 await self.queue.put(e)
+                await asyncio.sleep(5)
+                self.market_data_stream = self.client.create_market_data_stream()
 
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """
