@@ -95,13 +95,17 @@ async def conclusion_in_day(connect: ConnectTinkoff, bot: Bot):
             connect.client.operations.get_withdraw_limits(account_id=ACCOUNT_ID),
             connect.client.operations.get_portfolio(account_id=ACCOUNT_ID)
         )
-        string = ''
+        string = '<b>Данные по позициям</b>\n'
         if positions := portfolio.positions:
             for pos in positions:
-                string += (f'Name: {await connect.figi_to_name(pos.figi)}-{pos.instrument_type}\n'
+                string += (f'<b>{await connect.figi_to_name(pos.figi)}-{pos.instrument_type}</b>\n'
+                           f'Количество инструмента: {quotation_to_decimal(pos.quantity)}\n'
+                           f'Средневзвешенная цена позиции: {quotation_to_decimal(pos.average_position_price):.2f}\n'
+                           f'Текущая стоимость: {quotation_to_decimal(pos.quantity) * money_to_decimal(pos.current_price):.2f}\n'
                            f'Текущая рассчитанная доходность позиции: {quotation_to_decimal(pos.expected_yield):.2f}\n\n')
 
-        string += (f'Доходность портфеля: <b>{quotation_to_decimal(portfolio.expected_yield):.2f}%</b>\n'
+        string += (f'<b>Общая информация по портфелю</b>\n'
+                   f'Доходность портфеля: <b>{quotation_to_decimal(portfolio.expected_yield):.2f}%</b>\n'
                    f'Общая стоимость портфеля: <b>{money_to_decimal(portfolio.total_amount_portfolio):.2f}</b>\n')
 
         text = ''
