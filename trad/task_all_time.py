@@ -93,7 +93,8 @@ async def conclusion_in_day(connect: ConnectTinkoff, bot: Bot):
     if connect.client:
         with_draw, portfolio = await asyncio.gather(
             connect.client.operations.get_withdraw_limits(account_id=ACCOUNT_ID),
-            connect.client.operations.get_portfolio(account_id=ACCOUNT_ID))
+            connect.client.operations.get_portfolio(account_id=ACCOUNT_ID)
+        )
         string = ''
         if positions := portfolio.positions:
             for pos in positions:

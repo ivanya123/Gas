@@ -11,6 +11,7 @@ from trad.connect_tinkoff import ConnectTinkoff
 from config import TOKEN, CHAT_ID, TOKEN_D
 import utils as ut
 import bot.keyboard as kb
+from trad.task_all_time import conclusion_in_day
 
 start_router = Router()
 dict_function = {}
@@ -63,6 +64,11 @@ async def subscribe(message: Message):
 @start_router.message(CommandStart())
 async def start(message: Message):
     await bot.send_message(chat_id=CHAT_ID, text='При нажатии покажет информацию о позиции', reply_markup=kb.kb_ticker())
+
+
+@start_router.message(F.text == 'Bot_portfolio')
+async def portfolio(message: Message):
+    await conclusion_in_day(connect, bot)
 
 
 @start_router.callback_query(F.data)
