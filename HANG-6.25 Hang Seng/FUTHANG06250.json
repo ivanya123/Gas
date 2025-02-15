@@ -23,7 +23,7 @@
     "country_of_risk_name": "\u0420\u043e\u0441\u0441\u0438\u0439\u0441\u043a\u0430\u044f \u0424\u0435\u0434\u0435\u0440\u0430\u0446\u0438\u044f",
     "sector": "SECTOR_OTHER",
     "expiration_date": "2025-06-20T00:00:00+00:00",
-    "trading_status": 5,
+    "trading_status": 4,
     "otc_flag": false,
     "buy_available_flag": true,
     "sell_available_flag": true,
@@ -41,15 +41,15 @@
     "first_1day_candle_date": "2024-07-19T00:00:00+00:00",
     "initial_margin_on_buy": {
         "currency": "rub",
-        "units": 429,
-        "nano": 620000000
+        "units": 425,
+        "nano": 420000000
     },
     "initial_margin_on_sell": {
         "currency": "rub",
-        "units": 437,
-        "nano": 720000000
+        "units": 433,
+        "nano": 290000000
     },
-    "min_price_increment_amount": 0.11708,
+    "min_price_increment_amount": 0.11623,
     "brand": {
         "logo_name": "HangSeng.png",
         "logo_base_color": "#fb0000",

@@ -8,14 +8,14 @@ from bot.telegram_bot import bot
 from data_create.historic_future import HistoricInstrument
 from strategy.docnhian import StrategyContext
 from trad.connect_tinkoff import ConnectTinkoff
-from config import TOKEN, CHAT_ID
+from config import TOKEN, CHAT_ID, TOKEN_D
 import utils as ut
 import bot.keyboard as kb
 
 start_router = Router()
 dict_function = {}
 dict_instruments = {}
-connect = ConnectTinkoff(TOKEN)
+connect = ConnectTinkoff(TOKEN_D)
 event_stop_stream_to_chat = asyncio.Event()
 
 

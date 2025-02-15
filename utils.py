@@ -214,7 +214,10 @@ def posr_to_string(posr: PositionsStreamResponse) -> str:
                            f'Заблокированное количество валютный позиций: '
                            f'{money_to_decimal(m.blocked_value):.2f} '
                            f'{m.blocked_value.currency}')
-
+        if posr.ping:
+            dt_moscow = posr.ping.time.astimezone(ZoneInfo("Europe/Moscow"))
+            string += f'Получен пинг:\n' \
+                      f'Time: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n'
     return string
 
 

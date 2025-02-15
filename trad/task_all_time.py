@@ -1,14 +1,18 @@
 import asyncio
+import json
 import pickle
+from typing import Coroutine
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse
-from tinkoff.invest.utils import quotation_to_decimal
+from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse, \
+    WithdrawLimitsResponse, PortfolioResponse
+from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
 from strategy.docnhian import StrategyContext
 from trad.connect_tinkoff import ConnectTinkoff
 from data_create.historic_future import HistoricInstrument
-from config import CHAT_ID, ACCOUNT_ID
+from config import CHAT_ID, ACCOUNT_ID, TOKEN_D
 import utils as ut
 
 event_stop_stream_to_chat = asyncio.Event()
@@ -30,8 +34,6 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot):
     if connect.market_data_stream:
         while True:
             msg: MarketDataResponse = await connect.queue.get()
-            print(msg)
-            print(ut.market_data_response_to_string(msg))
             with open('log.txt', 'a') as f:
                 f.write(ut.market_data_response_to_string(msg) + '\n')
             if last_price := msg.last_price:
@@ -40,7 +42,6 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot):
                         dict_strategy_subscribe: dict[str, StrategyContext] = pickle.load(f)
                     if dict_strategy_subscribe[msg.last_price.figi]:
                         text = ut.processing_last_price(last_price, dict_strategy_subscribe[msg.last_price.figi])
-                        print(dict_strategy_subscribe[msg.last_price.figi].state)
                         if text:
                             with open('dict_strategy_state.pkl', 'wb') as f:
                                 pickle.dump(dict_strategy_subscribe, f, pickle.HIGHEST_PROTOCOL)
@@ -54,20 +55,22 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot):
                 msg_str = ut.market_data_response_to_string(msg) + '\n'
                 await bot.send_message(chat_id=CHAT_ID, text=msg_str)
 
+
 async def processing_stream_portfolio(connect: ConnectTinkoff, bot: Bot):
     if connect.client:
         task_portfolio_stream = asyncio.create_task(connect.listening_portfolio_by_id(ACCOUNT_ID))
         task_operations_stream = asyncio.create_task(connect.listening_operations_by_id(ACCOUNT_ID))
+        while not connect.queue_portfolio:
+            await asyncio.sleep(4)
+            print('Ждем подключения к стриму')
         while True:
             response: PortfolioStreamResponse | PositionsStreamResponse = await connect.queue_portfolio.get()
             if isinstance(response, PortfolioStreamResponse):
-                psr_text = psr_to_string(response)
-
-
-
-
-
-
+                text = ut.psr_to_string(response)
+                await bot.send_message(chat_id=CHAT_ID, text=text)
+            if isinstance(response, PositionsStreamResponse):
+                text = ut.posr_to_string(response)
+                await bot.send_message(CHAT_ID, text)
 
 
 async def update_data(connect: ConnectTinkoff, bot: Bot):
@@ -87,3 +90,39 @@ async def update_data(connect: ConnectTinkoff, bot: Bot):
         await bot.send_message(chat_id=CHAT_ID, text=text)
     else:
         await bot.send_message(chat_id=CHAT_ID, text='Нет действующих подписок')
+
+
+async def conclusion_in_day(connect: ConnectTinkoff, bot: Bot):
+    if connect.client:
+        with_draw, portfolio = await asyncio.gather(
+            connect.client.operations.get_withdraw_limits(account_id=ACCOUNT_ID),
+            connect.client.operations.get_portfolio(account_id=ACCOUNT_ID))
+        string = ''
+        if positions := portfolio.positions:
+            for pos in positions:
+                string += (f'Figi: {pos.figi}-{pos.instrument_type}\n'
+                           f'Текущая рассчитанная доходность позиции: {quotation_to_decimal(pos.expected_yield):.2f}\n\n')
+
+        string += (f'Доходность портфеля: <b>{quotation_to_decimal(portfolio.expected_yield):.2f}%</b>\n'
+                   f'Общая стоимость портфеля: <b>{money_to_decimal(portfolio.total_amount_portfolio):.2f}</b>\n')
+
+        text = ''
+        text += (f'Массив валютных позиций портфеля:'
+                 f' {sum(money_to_decimal(i) for i in with_draw.money):.2f}\n'
+                 f'Массив заблокированных валютных позиций портфеля:'
+                 f' {sum(money_to_decimal(i) for i in with_draw.blocked):.2f}\n'
+                 f'Заблокировано под гарантийное обеспечение фьючерсов:'
+                 f' <b>{sum(money_to_decimal(i) for i in with_draw.blocked_guarantee):.2f}</b>\n')
+
+        await bot.send_message(chat_id=CHAT_ID, text=string)
+        await bot.send_message(chat_id=CHAT_ID, text=text)
+
+
+if __name__ == '__main__':
+    async def main():
+        connect = ConnectTinkoff(TOKEN_D)
+        await connect.connect()
+        await conclusion_in_day(connect, 1)
+
+
+    asyncio.run(main())
