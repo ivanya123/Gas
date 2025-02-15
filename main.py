@@ -13,7 +13,7 @@ async def main():
         'bot': bot
     }
     scheduler.add_job(update_data, 'cron', kwargs=kwargs, hour=8, minute=50)
-    scheduler.add_job(conclusion_in_day, 'cron', kwargs=kwargs, hour='14,21', minute=17)
+    scheduler.add_job(conclusion_in_day, 'cron', kwargs=kwargs, hour='14,21', minute=0)
     await start_bot(connect=connect, bot=bot)
     task_stream_msg = asyncio.create_task(processing_stream(connect=connect, bot=bot))
     task_stream_portfolio = asyncio.create_task(processing_stream_portfolio(connect=connect, bot=bot))

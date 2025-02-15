@@ -23,12 +23,13 @@ event_stop_stream_to_chat = asyncio.Event()
 async def subscribe(message: Message):
     try:
         tickers = message.text.split(' ')[1:]
-        ut.validate_tickers(tickers)
+        # ut.validate_tickers(tickers)
     except IndexError as e:
         await bot.send_message(chat_id=message.chat.id, text='Неверный формат команды')
         return
     if connect.client:
         instruments = []
+        figi_instruments = []
         his_instr: list[HistoricInstrument] = []
         for ticker in tickers:
             try:
@@ -42,6 +43,7 @@ async def subscribe(message: Message):
                 continue
             his_instr.append(new_historic_instrument)
             instruments.append(new_historic_instrument.instrument_info.uid)
+            figi_instruments.append(new_historic_instrument.instrument_info.figi)
             with open('dict_strategy_state.pkl', 'rb') as f:
                 dict_strategy_subscribe: dict[str, StrategyContext] = pickle.load(f)
             dict_strategy_subscribe[new_historic_instrument.instrument_info.figi] = (
@@ -50,6 +52,8 @@ async def subscribe(message: Message):
                 pickle.dump(dict_strategy_subscribe, f)
         await connect.add_subscribe_last_price(instruments)
         await connect.add_subscribe_status_instrument(instruments)
+        list_task = [connect.figi_to_name(figi) for figi in figi_instruments]
+        await asyncio.gather(*list_task)
         for instrument in his_instr:
             ut.create_folder_and_save_historic_instruments(instrument)
     else:

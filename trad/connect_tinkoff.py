@@ -1,13 +1,15 @@
 import asyncio
 import datetime
+import json
 
+from async_lru import alru_cache
 from tinkoff.invest import (
     AsyncClient,
     CandleInterval,
     FuturesResponse,
     Future, HistoricCandle, CandleInstrument,
     SubscriptionInterval, LastPriceInstrument, GetAccountsResponse,
-    PortfolioResponse, FutureResponse, InfoInstrument, )
+    PortfolioResponse, FutureResponse, InfoInstrument, InstrumentIdType, InstrumentResponse, )
 from tinkoff.invest.async_services import AsyncServices
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
@@ -45,6 +47,29 @@ class ConnectTinkoff:
         self.client: AsyncServices | None = None
         self._client: AsyncClient | None = None
 
+    async def connect(self):
+        """
+        Создаёт асинхронное соединение и инициализирует менеджер стриминга.
+        """
+        self._client = AsyncClient(self.token)
+        self.client = await self._client.__aenter__()
+        self.market_data_stream: AsyncMarketDataStreamManager = self.client.create_market_data_stream()
+        self.queue: asyncio.Queue = asyncio.Queue()
+        self.listen: asyncio.Task = asyncio.create_task(self._listen_stream())
+
+    async def _listen_stream(self) -> None:
+        """
+        Слушает сообщения из стриминга.
+        """
+        if self.market_data_stream is None:
+            return
+        if self.market_data_stream:
+            try:
+                async for msg in self.market_data_stream:
+                    await self.queue.put(msg)
+            except Exception as e:
+                await self.queue.put(e)
+
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """
         Получение свечей по тикету
@@ -81,28 +106,21 @@ class ConnectTinkoff:
             response.append(candle)
         return response, instrument.instrument
 
-    async def connect(self):
-        """
-        Создаёт асинхронное соединение и инициализирует менеджер стриминга.
-        """
-        self._client = AsyncClient(self.token)
-        self.client = await self._client.__aenter__()
-        self.market_data_stream: AsyncMarketDataStreamManager = self.client.create_market_data_stream()
-        self.queue: asyncio.Queue = asyncio.Queue()
-        self.listen: asyncio.Task = asyncio.create_task(self._listen_stream())
-
-    async def _listen_stream(self) -> None:
-        """
-        Слушает сообщения из стриминга.
-        """
-        if self.market_data_stream is None:
-            return
-        if self.market_data_stream:
-            try:
-                async for msg in self.market_data_stream:
-                    await self.queue.put(msg)
-            except Exception as e:
-                await self.queue.put(e)
+    @alru_cache
+    async def figi_to_name(self, figi: str) -> str:
+        if self.client:
+            instrument: InstrumentResponse = await self.client.instruments.get_instrument_by(
+                id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
+                id=figi
+            )
+            if instrument:
+                with open('figi_to_name.json', 'r') as f:
+                    figi_to_name = json.load(f)
+                if instrument.instrument.figi not in figi_to_name:
+                    figi_to_name[instrument.instrument.figi] = instrument.instrument.name
+                    with open('figi_to_name.json', 'w') as f:
+                        json.dump(figi_to_name, f, indent=4)
+                return instrument.instrument.name
 
     async def add_subscribe_candle(self, instruments: list[str], interval: str | None = None) -> None:
         """
@@ -176,12 +194,6 @@ class ConnectTinkoff:
             instrument = LastPriceInstrument(instrument_id=instrument_id)
             self.market_data_stream.last_price.unsubscribe(instruments=[instrument])
 
-    async def disconnect(self):
-        if self.market_data_stream:
-            self.market_data_stream.stop()
-            self.market_data_stream = None
-            await self._client.__aexit__(None, None, None)
-
     async def info_accounts(self) -> list[PortfolioResponse]:
         """
         Получение информации о портфеле
@@ -229,6 +241,12 @@ class ConnectTinkoff:
         async for operations_response in self.client.operations_stream.positions_stream(
                 accounts=[account_id]):
             self.queue_portfolio.put_nowait(operations_response)
+
+    async def disconnect(self):
+        if self.market_data_stream:
+            self.market_data_stream.stop()
+            self.market_data_stream = None
+            await self._client.__aexit__(None, None, None)
 
 
 if __name__ == '__main__':

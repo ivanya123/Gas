@@ -3,15 +3,15 @@
 """
 import json
 import os
-import datetime
 import pickle
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
 from data_create.historic_future import HistoricInstrument
-from strategy.docnhian import StrategyContext, StrategyState
+from strategy.docnhian import StrategyContext
 
 
 def market_data_response_to_string(msg: MarketDataResponse) -> str:
@@ -25,7 +25,7 @@ def market_data_response_to_string(msg: MarketDataResponse) -> str:
         candle_sub = msg.subscribe_candles_response.candles_subscriptions
         string_sub = ''
         for sub in candle_sub:
-            string_sub += (f'Figi: {sub.figi}\n'
+            string_sub += (f'Name: {figi_to_name(sub.figi)}\n'
                            f'Interval: {sub.interval.name}\n\n')
         string += f'Оформлены подписки:\n{string_sub}\n'
 
@@ -33,7 +33,7 @@ def market_data_response_to_string(msg: MarketDataResponse) -> str:
         order_book_sub = msg.subscribe_order_book_response.order_book_subscriptions
         string_sub = ''
         for sub in order_book_sub:
-            string_sub += (f'Figi: {sub.figi}\n'
+            string_sub += (f'Name: {figi_to_name(sub.figi)}\n'
                            f'Depth: {sub.depth}\n\n')
         string += f'Оформлены подписки на стаканы:\n{string_sub}\n'
 
@@ -41,14 +41,14 @@ def market_data_response_to_string(msg: MarketDataResponse) -> str:
         last_price_sub = msg.subscribe_last_price_response.last_price_subscriptions
         string_sub = ''
         for sub in last_price_sub:
-            string_sub += f'Figi: {sub.figi}\n'
+            string_sub += f'Name: {figi_to_name(sub.figi)}\n'
         string += f'Оформлены подписки на последние цены:\n{string_sub}\n'
 
     if msg.candle:
         candle = msg.candle
         dt_moscow = candle.time.astimezone(ZoneInfo("Europe/Moscow"))
         string += f'Получена свеча:\n'
-        string += (f'Figi: {candle.figi}\n'
+        string += (f'Name: {figi_to_name(candle.figi)}\n'
                    f'Interval: {candle.interval.name}\n'
                    f'Open: {quotation_to_decimal(candle.open)}\n'
                    f'Close: {quotation_to_decimal(candle.close)}\n'
@@ -61,7 +61,7 @@ def market_data_response_to_string(msg: MarketDataResponse) -> str:
         orderbook = msg.orderbook
         string += f'Получен стакан:\n'
         dt_moscow = orderbook.time.astimezone(ZoneInfo("Europe/Moscow"))
-        string += (f'Figi: {orderbook.figi}\n'
+        string += (f'Name: {figi_to_name(orderbook.figi)}\n'
                    f'Depth: {orderbook.depth}\n'
                    f'Time: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n')
         bids_sum = sum([quotation_to_decimal(order.price) * order.quantity for order in orderbook.bids])
@@ -76,7 +76,7 @@ def market_data_response_to_string(msg: MarketDataResponse) -> str:
         last_price = msg.last_price
         dt_moscow = last_price.time.astimezone(ZoneInfo("Europe/Moscow"))
         string += f'Получена последняя цена:\n'
-        string += (f'Figi: {last_price.figi}\n'
+        string += (f'Name: {figi_to_name(last_price.figi)}\n'
                    f'Price: {quotation_to_decimal(last_price.price)}\n'
                    f'Time: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n')
 
@@ -84,13 +84,13 @@ def market_data_response_to_string(msg: MarketDataResponse) -> str:
         info_sub = msg.subscribe_info_response.info_subscriptions
         string_sub = ''
         for sub in info_sub:
-            string_sub += f'Figi: {sub.figi}\n'
+            string_sub += f'Name: {figi_to_name(sub.figi)}\n'
         string += f'Оформлены подписки на информацию о торговых инструментах:\n{string_sub}\n'
 
     if msg.trading_status:
         status = msg.trading_status
         dt_moscow = status.time.astimezone(ZoneInfo("Europe/Moscow"))
-        string += (f'Изменен статус торгов {status.figi}\n'
+        string += (f'Изменен статус торгов <b>{figi_to_name(status.figi)}</b>\n'
                    f'Доступность выставления лимитной заявки: {status.limit_order_available_flag}\n'
                    f'Доступность выставления рыночной заявки: {status.market_order_available_flag}\n'
                    f'Time: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n')
@@ -121,11 +121,11 @@ def create_folder_and_save_historic_instruments(historic_instruments: HistoricIn
 
 
 def new_save_subs(dict_subs):
-    with open('subscribe.json', 'r') as f:
-        subs = json.load(f)
-    with open('subscribe.json', 'w') as f:
+    with open('subscribe.json', 'r') as file:
+        subs = json.load(file)
+    with open('subscribe.json', 'w') as file:
         subs.update(dict_subs)
-        json.dump(subs, f)
+        json.dump(subs, file)
 
 
 def get_all_path_subs(dict_instruments: dict[str, list[str]]) -> tuple[list[str]]:
@@ -166,11 +166,9 @@ def processing_last_price(last_price: LastPrice, context: StrategyContext):
 
 def psr_to_string(psr: PortfolioStreamResponse) -> str:
     string = ''
-    with open('figi_to_name.json', 'r') as f:
-        figi_to_name: dict[str, str] = json.load(f)
     if portfolio := psr.portfolio:
         for position in portfolio.positions:
-            string += (f'{figi_to_name[position.figi]}-{position.instrument_type}\n'
+            string += (f'{figi_to_name(position.figi)}-{position.instrument_type}\n'
                        f'Доходность: '
                        f'{position.expected_yield:.2f}-({(quotation_to_decimal(position.expected_yield) /
                                                           (quotation_to_decimal(position.quantity) *
@@ -194,12 +192,11 @@ def posr_to_string(posr: PositionsStreamResponse) -> str:
     string = ''
     if posr.subscriptions:
         string += 'Оформлена подписка на стрим позиций'
-    with open('figi_to_name.json', 'r') as f:
-        figi_to_name: dict[str, str] = json.load(f)
+
     if pos := posr.position:
         if futures := pos.futures:
             for fut in futures:
-                string += (f'Изменение позиции по фьючерсу {figi_to_name[fut.figi]}\n'
+                string += (f'Изменение позиции по фьючерсу {figi_to_name(fut.figi)}\n'
                            f'Количество бумаг заблокированных выставленными заявками: {fut.blocked}\n'
                            f'Текущий незаблокированный баланс: {fut.balance}\n')
         dt_moscow = pos.date.astimezone(ZoneInfo("Europe/Moscow"))
@@ -221,8 +218,11 @@ def posr_to_string(posr: PositionsStreamResponse) -> str:
     return string
 
 
-def validate_tickers(tickers):
-    pass
+@lru_cache
+def figi_to_name(figi: str) -> str:
+    with open('figi_to_name.json', 'r') as f:
+        figi_to_name: dict[str, str] = json.load(f)
+    return figi_to_name[figi]
 
 
 if __name__ == '__main__':

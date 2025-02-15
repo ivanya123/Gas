@@ -1,12 +1,9 @@
 import asyncio
-import json
+
 import pickle
-from typing import Coroutine
-from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse, \
-    WithdrawLimitsResponse, PortfolioResponse
+from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, PositionsStreamResponse
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
 from strategy.docnhian import StrategyContext
@@ -83,7 +80,7 @@ async def update_data(connect: ConnectTinkoff, bot: Bot):
         new_historic.create_donchian_canal(context_strategy.n, int(context_strategy.n / 2))
         path = ut.create_folder_and_save_historic_instruments(new_historic)
         dict_strategy_state[figi].update_atr(new_historic)
-        text += f'Данные для {new_historic.instrument_info.name} обновлены и сохранены в {path}\n'
+        text += f'Данные для <b>{new_historic.instrument_info.name}</b> обновлены и сохранены в {path}\n\n'
     with open('dict_strategy_state.pkl', 'wb') as f:
         pickle.dump(dict_strategy_state, f)
     if text:
@@ -100,7 +97,7 @@ async def conclusion_in_day(connect: ConnectTinkoff, bot: Bot):
         string = ''
         if positions := portfolio.positions:
             for pos in positions:
-                string += (f'Figi: {pos.figi}-{pos.instrument_type}\n'
+                string += (f'Name: {await connect.figi_to_name(pos.figi)}-{pos.instrument_type}\n'
                            f'Текущая рассчитанная доходность позиции: {quotation_to_decimal(pos.expected_yield):.2f}\n\n')
 
         string += (f'Доходность портфеля: <b>{quotation_to_decimal(portfolio.expected_yield):.2f}%</b>\n'
