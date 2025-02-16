@@ -1,13 +1,18 @@
 import abc
 import pickle
 
+from tinkoff.invest import OrderDirection, OrderType
+
+from config import ACCOUNT_ID
 from data_create.historic_future import HistoricInstrument
+import utils as ut
+from trad.connect_tinkoff import ConnectTinkoff
 
 
 # Базовый класс для состояний стратегии
 class StrategyState(abc.ABC):
     @abc.abstractmethod
-    def on_new_price(self, context: 'StrategyContext', price: float):
+    def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
         """
         Обработка нового ценового обновления и переход к следующему состоянию, если необходимо.
         """
@@ -16,14 +21,21 @@ class StrategyState(abc.ABC):
 
 # Состояние "Ожидание пробоя" – нет открытой сделки, ждём пробоя канала
 class IdleState(StrategyState):
-    def on_new_price(self, context: 'StrategyContext', price: float):
-        # Если цена превышает уровень пробоя + один тик, открываем сделку
+    async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
         if price >= context.breakout_level_long + context.tick_size:
-            # Цена входа = пробой + один тик
-            entry = price  # уже с учетом +tick, можно добавить context.tick_size если нужно
+            entry = price
             context.entry_prices.append(entry)
+            kwargs = {
+                'instrument_id': context.instrument_uid,
+                'quantity': ut.calculation_quantity(price, context.portfolio_size, context.atr),
+                'price': price,
+                'direction': OrderDirection.ORDER_DIRECTION_BUY,
+                'account_id': ACCOUNT_ID,
+                'order_type': OrderType.ORDER_TYPE_LIMIT,
+                'order_id': ut.generate_order_id()
+            }
+            result = await connect.post_order(**kwargs)
             context.position_units = 1
-            # Устанавливаем стоп на уровне: entry - 0.5*ATR (для лонга)
             context.stop_levels.append(entry - 0.5 * context.atr)
             context.state = TradeOpenState()
             context.long = True
@@ -39,14 +51,12 @@ class IdleState(StrategyState):
             print(f"[{context.instrument_figi}] Trade opened short at {entry:.4f}")
             return True
         else:
-            # В состоянии Idle просто обновляем, если нужно
             pass
 
 
 # Состояние "Открытая сделка" – позиция открыта, можно добавлять юниты или закрывать сделку
 class TradeOpenState(StrategyState):
     def on_new_price(self, context: 'StrategyContext', price: float):
-        # Попытка добавить новый юнит, если цена прошла 0.5*ATR от последнего входа
         last_entry = context.entry_prices[-1]
         if context.position_units < context.max_units and price >= last_entry + 0.5 * context.atr and context.long:
             new_entry = price
@@ -86,13 +96,10 @@ class TradeOpenState(StrategyState):
             context.exit_price = price
             print(f"[{context.instrument_figi}] Stop triggered at {price:.4f}. Exiting trade.")
             return True
-        # Можно добавить и условия тейк-профита, и дополнительные логики
 
 
-# Состояние "Выход из сделки" – сделка закрывается, фиксируются результаты
 class ExitState(StrategyState):
     def on_new_price(self, context: 'StrategyContext', price: float):
-        # Сделка уже закрыта, ничего не делаем или можно инициировать рестарт стратегии
         print(f"[{context.instrument_figi}] Trade already closed at {context.exit_price:.4f}")
 
 
@@ -100,11 +107,9 @@ class ExitState(StrategyState):
 class StrategyContext:
     def __init__(self, history_instrument: HistoricInstrument, portfolio_size: float, n: int):
         """
-        :param instrument: Идентификатор/название инструмента
+        :param history_instrument: Данные по инструрменту, который будет торговаться по этой стратегии
         :param portfolio_size: Размер портфеля (например, в долларах)
-        :param tick_size: Размер тика (например, минимальное изменение цены)
-        :param atr: Значение ATR (средний истинный диапазон)
-        :param breakout_level: Уровень, на котором происходит пробой канала (например, вычисленный Donchian канал)
+        :param n: Длина канала Дончяна (например, 20)
         """
         self.instrument_figi = history_instrument.instrument_info.figi
         self.name = history_instrument.instrument_info.name
@@ -125,10 +130,10 @@ class StrategyContext:
 
         self.max_units = 4
         self.position_units = 0
-        self.entry_prices = []  # Список цен входа по каждому юниту
-        self.stop_levels = []  # Список стоп-лосс уровней для каждого юнита
-        self.exit_price = None  # Цена выхода из сделки
-        self.state: StrategyState = IdleState()  # Начальное состояние: ожидание пробоя
+        self.entry_prices = []
+        self.stop_levels = []
+        self.exit_price = None
+        self.state: StrategyState = IdleState()
 
     def on_new_price(self, price: float):
         """
@@ -170,16 +175,16 @@ class StrategyContext:
 
 # Пример использования:
 if __name__ == '__main__':
-    # Допустим, у нас есть данные для инструмента "BMH5"
     context = StrategyContext(
         history_instrument=HistoricInstrument.from_pkl(
             path=r'C:\Users\aples\PycharmProjects\Gas\IMOEXF Индекс МосБиржи\FUTIMOEXF000'),
         portfolio_size=100000,
-        n=20  # размер портфеля, например, 100,000
+        n=20
     )
 
     dict_strategy_context = {
         f'{context.instrument_figi}': context
     }
+
     with open(r'C:\Users\aples\PycharmProjects\Gas\dict_strategy_state.pkl', 'wb') as f:
         pickle.dump(dict_strategy_context, f, protocol=pickle.HIGHEST_PROTOCOL)

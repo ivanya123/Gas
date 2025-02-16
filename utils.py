@@ -2,6 +2,7 @@
 Функции для обработки ответов от Tinkoff API и преобразование их в другой формат.
 """
 import json
+import math
 import os
 import pickle
 from functools import lru_cache
@@ -225,11 +226,17 @@ def figi_to_name(figi: str) -> str:
     return figi_to_name[figi]
 
 
-if __name__ == '__main__':
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, StrategyContext] = pickle.load(f)
+def calculation_quantity(price: float, portfolio: float, atr: float) -> int:
+    """
+    Вычисляет количество бумаг для покупки.
+    :param price: Цена покупки.
+    :param portfolio: Размер моего счёта.
+    :param atr: Средний истинный диапазон за 14 дней.
+    :return: Количество лотов для выставления ордера.
+    """
+    quantity = math.ceil(0.01 * portfolio / (atr * price))
+    return quantity
 
-    dict_f_to_n = {key: value.name for key, value in dict_strategy_state.items()}
 
-    with open('figi_to_name.json', 'w') as f:
-        json.dump(dict_f_to_n, f, indent=4)
+def generate_order_id():
+    return None

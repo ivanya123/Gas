@@ -9,7 +9,8 @@ from tinkoff.invest import (
     FuturesResponse,
     Future, HistoricCandle, CandleInstrument,
     SubscriptionInterval, LastPriceInstrument, GetAccountsResponse,
-    PortfolioResponse, FutureResponse, InfoInstrument, InstrumentIdType, InstrumentResponse, )
+    PortfolioResponse, FutureResponse, InfoInstrument, InstrumentIdType, InstrumentResponse, Quotation, OrderDirection,
+    OrderType)
 from tinkoff.invest.async_services import AsyncServices
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
@@ -38,6 +39,7 @@ def string_to_interval(interval: str):
 
 class ConnectTinkoff:
     def __init__(self, token):
+        self.queue_order: asyncio.Queue = asyncio.Queue()
         self.token = token
         self.queue: asyncio.Queue | None = None
         self.queue_portfolio: asyncio.Queue | None = None
@@ -246,6 +248,22 @@ class ConnectTinkoff:
         async for operations_response in self.client.operations_stream.positions_stream(
                 accounts=[account_id]):
             self.queue_portfolio.put_nowait(operations_response)
+
+    async def post_order(self, instrument_id: str, quantity: int, price: Quotation, direction: OrderDirection,
+                         account_id: str, order_id: str, order_type: OrderType):
+        if client := self.client:
+            kwargs = {
+                'instrument_id': instrument_id,
+                'quantity': quantity,
+                'price': price,
+                'direction': direction,
+                'account_id': account_id,
+                'order_id': order_id,
+                'order_type': order_type
+            }
+            result = await client.orders.post_order(**kwargs)
+            self.queue_order.put_nowait(result)
+            return result
 
     async def disconnect(self):
         if self.market_data_stream:

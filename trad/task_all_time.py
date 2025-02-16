@@ -38,11 +38,11 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot):
                     with open('dict_strategy_state.pkl', 'rb') as f:
                         dict_strategy_subscribe: dict[str, StrategyContext] = pickle.load(f)
                     if dict_strategy_subscribe[msg.last_price.figi]:
-                        text = ut.processing_last_price(last_price, dict_strategy_subscribe[msg.last_price.figi])
-                        if text:
+                        result = ut.processing_last_price(last_price, dict_strategy_subscribe[msg.last_price.figi])
+                        if result:
                             with open('dict_strategy_state.pkl', 'wb') as f:
                                 pickle.dump(dict_strategy_subscribe, f, pickle.HIGHEST_PROTOCOL)
-                            await bot.send_message(chat_id=CHAT_ID, text=text)
+                            await bot.send_message(chat_id=CHAT_ID, text=result)
                 except Exception as e:
                     print(f"Произошла ошибка {e}")
             if msg.trading_status:
@@ -101,7 +101,8 @@ async def conclusion_in_day(connect: ConnectTinkoff, bot: Bot):
                 string += (f'<b>{await connect.figi_to_name(pos.figi)}-{pos.instrument_type}</b>\n'
                            f'Количество инструмента: {quotation_to_decimal(pos.quantity)}\n'
                            f'Средневзвешенная цена позиции: {quotation_to_decimal(pos.average_position_price):.2f}\n'
-                           f'Текущая стоимость: {quotation_to_decimal(pos.quantity) * money_to_decimal(pos.current_price):.2f}\n'
+                           f'Текущая стоимость позиции: {quotation_to_decimal(pos.quantity) *
+                                                         money_to_decimal(pos.current_price):.2f}\n'
                            f'Текущая рассчитанная доходность позиции: {quotation_to_decimal(pos.expected_yield):.2f}\n\n')
 
         string += (f'<b>Общая информация по портфелю</b>\n'
