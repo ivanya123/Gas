@@ -2,7 +2,7 @@ import asyncio
 import pickle
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from bot.telegram_bot import bot
 from data_create.historic_future import HistoricInstrument
@@ -79,3 +79,13 @@ async def callback(callback: CallbackQuery):
     dict_info = context.current_position_info()
     text = '\n'.join(f'{key}: {value}' for key, value in dict_info.items())
     await bot.send_message(chat_id=callback.message.chat.id, text=text)
+
+
+@start_router.message(Command('tasks'))
+async def tasks(message: Message):
+    tasks = asyncio.all_tasks()
+    text = ''
+    for task in tasks:
+        text += f'{task}\n'
+    await bot.send_message(chat_id=message.chat.id, text=text)
+

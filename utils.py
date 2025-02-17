@@ -8,7 +8,8 @@ import pickle
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
-from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse
+from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse, \
+    TradesStreamResponse, OrderType, OrderDirection
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
 from data_create.historic_future import HistoricInstrument
@@ -176,7 +177,7 @@ def psr_to_string(psr: PortfolioStreamResponse) -> str:
                                                            money_to_decimal(position.average_position_price))):.1%})\n')
         string += (f'\nОбщая информация по портфелю\n'
                    f'Доходность: {portfolio.expected_yield}%\n'
-                   f'Стоимость портфеля: {portfolio.total_amount_portfolio}')
+                   f'Стоимость портфеля: {money_to_decimal(portfolio.total_amount_portfolio)}')
 
     if psr.ping:
         dt_moscow = psr.ping.time.astimezone(ZoneInfo("Europe/Moscow"))
@@ -186,7 +187,7 @@ def psr_to_string(psr: PortfolioStreamResponse) -> str:
     if psr.subscriptions:
         string += 'Оформлена подписка на стрим портфолио'
 
-    return string
+    return string, portfolio.total_amount_portfolio
 
 
 def posr_to_string(posr: PositionsStreamResponse) -> str:
@@ -219,6 +220,26 @@ def posr_to_string(posr: PositionsStreamResponse) -> str:
     return string
 
 
+def update_strategy_by_price(last_price, msg):
+    with open('dict_strategy_state.pkl', 'rb') as f:
+        dict_strategy_subscribe: dict[str, StrategyContext] = pickle.load(f)
+    if dict_strategy_subscribe[msg.last_price.figi]:
+        result = processing_last_price(last_price, dict_strategy_subscribe[msg.last_price.figi])
+        if result:
+            with open('dict_strategy_state.pkl', 'wb') as f:
+                pickle.dump(dict_strategy_subscribe, f, pickle.HIGHEST_PROTOCOL)
+            return result
+
+
+def update_all_portfolio_size(portfolio_amount):
+    with open('dict_strategy_state.pkl', 'rb') as f:
+        dict_strategy_state: dict[str, StrategyContext] = pickle.load(f)
+    for figi, context_strategy in dict_strategy_state.items():
+        context_strategy.update_portfolio_size(money_to_decimal(portfolio_amount))
+    with open('dict_strategy_state.pkl', 'wb') as f:
+        pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
+
+
 @lru_cache
 def figi_to_name(figi: str) -> str:
     with open('figi_to_name.json', 'r') as f:
@@ -240,3 +261,19 @@ def calculation_quantity(price: float, portfolio: float, atr: float) -> int:
 
 def generate_order_id():
     return None
+
+
+def tsr_to_string(trades_stream_response: TradesStreamResponse):
+    text = ''
+    if trades := trades_stream_response.order_trades:
+        dt_moscow = trades_stream_response.order_trades.created_at.astimezone(ZoneInfo("Europe/Moscow"))
+        text += (f'Информация об исполнении торгового поручения\n'
+                 f'<b>{figi_to_name(trades.figi)}</b>\n'
+                 f'Время создания: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n'
+                 f"Направление: {'Лонг' if trades.direction.name == OrderDirection.ORDER_DIRECTION_BUY else 'Шорт'}\n\n")
+        for trade in trades.trades:
+            text += (f'Цена: {money_to_decimal(trade.price):.2f}\n'
+                     f'Количество: {trade.quantity}\n')
+    if trades_stream_response.ping:
+        text += f'Пинг: {trades_stream_response.ping}\n'
+    return text

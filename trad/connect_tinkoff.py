@@ -14,6 +14,8 @@ from tinkoff.invest import (
 from tinkoff.invest.async_services import AsyncServices
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
+from bot.telegram_bot import logger
+
 
 def string_to_interval(interval: str):
     dict_result = {
@@ -39,6 +41,8 @@ def string_to_interval(interval: str):
 
 class ConnectTinkoff:
     def __init__(self, token):
+        self.task_portfolio_stream = None
+        self.task_operations_stream = None
         self.queue_order: asyncio.Queue = asyncio.Queue()
         self.token = token
         self.queue: asyncio.Queue | None = None
@@ -58,6 +62,9 @@ class ConnectTinkoff:
         self.market_data_stream: AsyncMarketDataStreamManager = self.client.create_market_data_stream()
         self.queue: asyncio.Queue = asyncio.Queue()
         self.listen: asyncio.Task = asyncio.create_task(self._listen_stream())
+        self.task_portfolio_stream: asyncio.Task = asyncio.create_task(self.listening_portfolio_by_id(ACCOUNT_ID))
+        self.task_operations_stream: asyncio.Task = asyncio.create_task(self.listening_operations_by_id(ACCOUNT_ID))
+        self.task_orders_stream: asyncio.Task = asyncio.create_task(self.listening_orders(ACCOUNT_ID))
 
     async def _listen_stream(self) -> None:
         """
@@ -69,10 +76,10 @@ class ConnectTinkoff:
         while True:
             try:
                 async for msg in self.market_data_stream:
-                    print('Все норм')
+                    logger.info('Получение сообщений основного стрима.')
                     await self.queue.put(msg)
             except Exception as e:
-                print(f'Ошибка при получении сообщения: {e}')
+                logger.error(f'Ошибка при получении сообщения: {e}')
                 await self.queue.put(e)
                 await asyncio.sleep(5)
                 self.market_data_stream = self.client.create_market_data_stream()
@@ -187,7 +194,7 @@ class ConnectTinkoff:
         :param last_price: bool - Удаляем цену на последние цены сделок.
         :return:
         """
-        print(f'Удаляем подписку на свечи {instrument_id}')
+        logger.info(f'Удаляем подписку на свечи {instrument_id}')
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
 
@@ -265,15 +272,26 @@ class ConnectTinkoff:
             self.queue_order.put_nowait(result)
             return result
 
+    async def listening_orders(self, account_id: str):
+        if not self.queue_order:
+            self.queue_order = asyncio.Queue()
+        if self.client:
+            async for order_response in self.client.orders_stream.trades_stream(
+                    accounts=[account_id]
+            ):
+                logger.debug(f'Выполнена заявка {order_response}')
+                self.queue_order.put_nowait(order_response)
+
     async def disconnect(self):
         if self.market_data_stream:
             self.market_data_stream.stop()
             self.market_data_stream = None
+            self.client = None
             await self._client.__aexit__(None, None, None)
 
 
 if __name__ == '__main__':
-    from config import TOKEN
+    from config import TOKEN, ACCOUNT_ID
 
     connect = ConnectTinkoff(TOKEN)
 
