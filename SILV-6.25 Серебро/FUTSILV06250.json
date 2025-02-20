@@ -41,15 +41,15 @@
     "first_1day_candle_date": "2024-06-14T00:00:00+00:00",
     "initial_margin_on_buy": {
         "currency": "rub",
-        "units": 4414,
-        "nano": 30000000
+        "units": 4373,
+        "nano": 340000000
     },
     "initial_margin_on_sell": {
         "currency": "rub",
-        "units": 4562,
-        "nano": 110000000
+        "units": 4518,
+        "nano": 360000000
     },
-    "min_price_increment_amount": 9.03099,
+    "min_price_increment_amount": 9.04268,
     "brand": {
         "logo_name": "SilverFut.png",
         "logo_base_color": "#000000",

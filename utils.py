@@ -1,19 +1,25 @@
 """
 Функции для обработки ответов от Tinkoff API и преобразование их в другой формат.
 """
+from __future__ import annotations
+
 import json
 import math
 import os
 import pickle
+import uuid
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
+from aiogram import Bot
 from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse, \
-    TradesStreamResponse, OrderType, OrderDirection
+    TradesStreamResponse, OrderDirection
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
+from config import CHAT_ID
 from data_create.historic_future import HistoricInstrument
-from strategy.docnhian import StrategyContext
+# from strategy.docnhian import StrategyContext
+from trad.connect_tinkoff import ConnectTinkoff
 
 
 def market_data_response_to_string(msg: MarketDataResponse) -> str:
@@ -151,7 +157,10 @@ def get_all_path_subs(dict_instruments: dict[str, list[str]]) -> tuple[list[str]
     return list_path_true
 
 
-def processing_last_price(last_price: LastPrice, context: StrategyContext):
+async def processing_last_price(last_price: LastPrice,
+                                context: 'StrategyContext',
+                                connect: ConnectTinkoff
+                                ):
     """
     Обрабатывает последнюю цену полученную в стриме.
     :param last_price:
@@ -159,7 +168,7 @@ def processing_last_price(last_price: LastPrice, context: StrategyContext):
     :return:
     """
     price = float(quotation_to_decimal(last_price.price))
-    result = context.on_new_price(price)
+    result = await context.on_new_price(price, connect)
     if result:
         text = (f'Смена состояния подписки на {context.state.__class__.__name__}\n'
                 f'{context.current_position_info()}')
@@ -220,20 +229,23 @@ def posr_to_string(posr: PositionsStreamResponse) -> str:
     return string
 
 
-def update_strategy_by_price(last_price, msg):
+async def update_strategy_by_price(last_price: LastPrice, connect: ConnectTinkoff, bot: Bot):
     with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_subscribe: dict[str, StrategyContext] = pickle.load(f)
-    if dict_strategy_subscribe[msg.last_price.figi]:
-        result = processing_last_price(last_price, dict_strategy_subscribe[msg.last_price.figi])
+        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
+    if last_price.figi in dict_strategy_state:
+        result = await processing_last_price(last_price,
+                                             dict_strategy_state[last_price.figi],
+                                             connect)
         if result:
             with open('dict_strategy_state.pkl', 'wb') as f:
-                pickle.dump(dict_strategy_subscribe, f, pickle.HIGHEST_PROTOCOL)
-            return result
+                pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
+            await bot.send_message(chat_id=CHAT_ID, text = result)
+
 
 
 def update_all_portfolio_size(portfolio_amount):
     with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, StrategyContext] = pickle.load(f)
+        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
     for figi, context_strategy in dict_strategy_state.items():
         context_strategy.update_portfolio_size(money_to_decimal(portfolio_amount))
     with open('dict_strategy_state.pkl', 'wb') as f:
@@ -260,7 +272,7 @@ def calculation_quantity(price: float, portfolio: float, atr: float) -> int:
 
 
 def generate_order_id():
-    return None
+    return str(uuid.uuid4())
 
 
 def tsr_to_string(trades_stream_response: TradesStreamResponse):

@@ -63,7 +63,9 @@ async def subscribe(message: Message):
 
 @start_router.message(CommandStart())
 async def start(message: Message):
-    await bot.send_message(chat_id=CHAT_ID, text='При нажатии покажет информацию о позиции', reply_markup=kb.kb_ticker())
+    await bot.send_message(chat_id=message.chat.id,
+                           text='При нажатии покажет информацию о позиции',
+                           reply_markup=kb.kb_ticker())
 
 
 @start_router.message(F.text == 'Bot_portfolio')

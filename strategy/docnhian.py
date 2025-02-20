@@ -1,19 +1,20 @@
+from __future__ import annotations
 import abc
 import pickle
 
-from tinkoff.invest import OrderTrades, OrderState
+from tinkoff.invest import OrderTrades, OrderState, OrderDirection
 
 import utils as ut
 from bot.telegram_bot import logger
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
-from trad.task_all_time import place_order_with_status_check
+from trad.task_all_time import place_order_with_status_check, update_position, order_for_close_position
 
 
 # Базовый класс для состояний стратегии
 class StrategyState(abc.ABC):
     @abc.abstractmethod
-    def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
+    async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
         """
         Обработка нового ценового обновления и переход к следующему состоянию, если необходимо.
         """
@@ -109,7 +110,9 @@ class TradeOpenState(StrategyState):
                 result = await place_order_with_status_check(connect=connect, context=context, price=price, long=True)
                 context.entry_prices.append(new_entry)
                 context.position_units += 1
-                context.stop_levels.append(context.exit_long_donchian)
+                context.stop_levels.append(context.exit_long_donchian if
+                                           context.exit_long_donchian > (new_entry + 0.5 * context.atr)
+                                           else new_entry + 0.5 * context.atr)
                 context.quantity += (result.lots_executed if isinstance(result, OrderState)
                                      else sum(i.quantity for i in result.trades))
                 logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] Последний этап"
@@ -126,7 +129,9 @@ class TradeOpenState(StrategyState):
                 result = await place_order_with_status_check(connect=connect, context=context, price=price, long=True)
                 context.entry_prices.append(new_entry)
                 context.position_units += 1
-                context.stop_levels.append(context.exit_long_donchian)
+                context.stop_levels.append(context.exit_long_donchian if
+                                           context.exit_long_donchian < (new_entry + 0.5 * context.atr)
+                                           else new_entry + 0.5 * context.atr)
                 context.quantity += (result.lots_executed if isinstance(result, OrderState)
                                      else sum(i.quantity for i in result.trades))
                 logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] Последний этап"
@@ -136,21 +141,45 @@ class TradeOpenState(StrategyState):
                 logger.info(e)
                 return False
 
-        if price < context.stop_levels[-1] and context.long:
-            context.state = ExitState()
+        elif price < context.stop_levels[-1] and context.long:
+            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}]-"
+                        f"закрытие позиции {context.position_units} - {price:.2f} - long")
             context.exit_price = price
-            print(f"[{context.instrument_figi}] Stop triggered at {price:.4f}. Exiting trade.")
-            return True
-        if price > context.stop_levels[-1] and context.short:
-            context.state = ExitState()
+            try:
+                result = await order_for_close_position(context, connect, price)
+                logger.info(f"[{context.instrument_figi}] позиция закрыта {price:.4f}. Переход в состоянии ожидания.")
+                context.state = IdleState()
+                context.position_units = 0
+                context.entry_prices.clear()
+                context.stop_levels.clear()
+                context.quantity = 0
+                context.long = None
+                context.short = None
+                context.exit_price = None
+                return True
+            except:
+                logger.info(f'Заявка не исполнена')
+                return False
+
+        elif price > context.stop_levels[-1] and context.short:
+            context.state = IdleState()
             context.exit_price = price
-            print(f"[{context.instrument_figi}] Stop triggered at {price:.4f}. Exiting trade.")
+            logger.info(f"[{context.instrument_figi}] позиция закрыта {price:.4f}. Переход в состоянии ожидания.")
             return True
-
-
-class ExitState(StrategyState):
-    async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
-        print(f"[{context.instrument_figi}] Trade already closed at {context.exit_price:.4f}")
+        elif context.position_units > context.max_units and context.long:
+            context.stop_levels[-1] = (context.exit_long_donchian if
+                                       context.exit_long_donchian > context.stop_levels[-1]
+                                       else context.stop_levels[-1])
+            logger.info(f'Смена стоп лосса на 10 дневный канал Дончяна.')
+            return True
+        elif context.position_units > context.max_units and context.short:
+            context.stop_levels[-1] = (context.exit_long_donchian if
+                                       context.exit_long_donchian < context.stop_levels[-1]
+                                       else context.stop_levels[-1])
+            logger.info(f'Смена стоп лосса на 10 дневный канал Дончяна.')
+            return True
+        else:
+            return False
 
 
 # Контекст, хранящий состояние стратегии для конкретного инструмента
@@ -175,9 +204,9 @@ class StrategyContext:
         self.breakout_level_short = history_instrument.min_donchian
         self.exit_long_donchian = history_instrument.min_short_donchian
         self.exit_short_donchian = history_instrument.max_short_donchian
+
         self.long = None
         self.short = None
-
         self.max_units = 4
         self.position_units = 0
         self.entry_prices = []
@@ -186,11 +215,29 @@ class StrategyContext:
         self.quantity = 0
         self.state: StrategyState = IdleState()
 
-    def on_new_price(self, price: float, connect: ConnectTinkoff):
+    @property
+    def direction(self) -> OrderDirection:
+        if self.long:
+            return OrderDirection.ORDER_DIRECTION_BUY
+        elif self.short:
+            return OrderDirection.ORDER_DIRECTION_SELL
+        else:
+            return None
+
+    @property
+    def close_direction(self) -> OrderDirection:
+        if self.long:
+            return OrderDirection.ORDER_DIRECTION_SELL
+        elif self.short:
+            return OrderDirection.ORDER_DIRECTION_BUY
+        else:
+            return None
+
+    async def on_new_price(self, price: float, connect: ConnectTinkoff):
         """
         При получении нового ценового обновления делегируем обработку текущему состоянию.
         """
-        result = self.state.on_new_price(self, price, connect)
+        result = await self.state.on_new_price(self, price, connect)
         return result
 
     def current_position_info(self):
@@ -199,14 +246,11 @@ class StrategyContext:
         """
         return {
             "name": self.name,
-            "instrument": self.instrument_figi,
             "units": self.position_units,
             "entry_prices": self.entry_prices,
             "quantity": self.quantity,
             "stop_levels": self.stop_levels,
-            "exit_price": self.exit_price,
-            'long': self.long,
-            'short': self.short,
+            'direction': self.direction,
             "state": self.state.__class__.__name__,
             "atr": self.atr,
             "breakout_level_long": self.breakout_level_long,
@@ -228,6 +272,8 @@ class StrategyContext:
     def update_portfolio_size(self, portfolio_size: int):
         self.portfolio_size = portfolio_size
 
+    async def update_position(self, connect: ConnectTinkoff):
+        await update_position(self, connect)
 
 
 # Пример использования:

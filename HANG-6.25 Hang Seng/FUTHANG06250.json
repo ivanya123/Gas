@@ -41,15 +41,15 @@
     "first_1day_candle_date": "2024-07-19T00:00:00+00:00",
     "initial_margin_on_buy": {
         "currency": "rub",
-        "units": 425,
-        "nano": 420000000
+        "units": 432,
+        "nano": 230000000
     },
     "initial_margin_on_sell": {
         "currency": "rub",
-        "units": 433,
-        "nano": 290000000
+        "units": 440,
+        "nano": 80000000
     },
-    "min_price_increment_amount": 0.11623,
+    "min_price_increment_amount": 0.11648,
     "brand": {
         "logo_name": "HangSeng.png",
         "logo_base_color": "#fb0000",
