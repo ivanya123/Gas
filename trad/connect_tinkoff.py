@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+import logging
 
 from async_lru import alru_cache
 from tinkoff.invest import (
@@ -13,10 +14,10 @@ from tinkoff.invest import (
     OrderType, PostOrderResponse)
 from tinkoff.invest.async_services import AsyncServices
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
-
-from bot.telegram_bot import logger
-
 from config import ACCOUNT_ID
+
+logger = logging.getLogger(__name__)
+
 
 def string_to_interval(interval: str):
     dict_result = {
@@ -42,6 +43,7 @@ def string_to_interval(interval: str):
 
 class ConnectTinkoff:
     def __init__(self, token):
+        self.task_orders_stream = None
         self.task_portfolio_stream = None
         self.task_operations_stream = None
         self.queue_order: asyncio.Queue = asyncio.Queue()
@@ -54,7 +56,7 @@ class ConnectTinkoff:
         self.client: AsyncServices | None = None
         self._client: AsyncClient | None = None
 
-    async def connect(self):
+    async def connection(self):
         """
         Создаёт асинхронное соединение и инициализирует менеджер стриминга.
         """
@@ -164,8 +166,8 @@ class ConnectTinkoff:
     async def add_subscribe_last_price(self, instruments: list[str]) -> None:
         """
         Добавляет подписку на цены последних сделок по id инструментов.
-        :param instruments: str - Список id инструментов.
-        :return: None
+        :param instruments: Str - Список id инструментов.
+        :return: None.
         """
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
@@ -244,6 +246,7 @@ class ConnectTinkoff:
         async for portfolio_response in self.client.operations_stream.portfolio_stream(
                 accounts=[account_id]):
             self.queue_portfolio.put_nowait(portfolio_response)
+            logger.debug(f'Получено сообщение о портфеле: {portfolio_response}')
 
     async def listening_operations_by_id(self, account_id: str):
         """

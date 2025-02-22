@@ -1,11 +1,14 @@
 from __future__ import annotations
 import abc
 import pickle
+from typing import Any
 
-from tinkoff.invest import OrderTrades, OrderState, OrderDirection
+from tinkoff.invest import OrderTrades, OrderState, OrderDirection, PortfolioResponse
+from tinkoff.invest.utils import money_to_decimal
 
 import utils as ut
 from bot.telegram_bot import logger
+from config import ACCOUNT_ID
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
 from trad.task_all_time import place_order_with_status_check, update_position, order_for_close_position
@@ -24,7 +27,7 @@ class StrategyState(abc.ABC):
 # Состояние "Ожидание пробоя" – нет открытой сделки, ждём пробоя канала
 class IdleState(StrategyState):
     async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
-        if price >= context.breakout_level_long + context.tick_size:
+        if price >= context.breakout_level_long + context.tick_size - 1:  # TODO: Убрать -1
             logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] сработал пробой канала {price:.2f} - long")
             entry = price
             try:
@@ -40,7 +43,7 @@ class IdleState(StrategyState):
                 logger.info(f"[{context.instrument_figi}] Trade opened at long {entry:.4f}")
                 return True
             except Exception as e:
-                logger.info(e)
+                logger.info(f'При выставлении ордера произошла ошибка{e}')
             return False
 
         elif price < context.breakout_level_short - context.tick_size:
@@ -64,7 +67,7 @@ class IdleState(StrategyState):
             return False
 
 
-# Состояние "Открытая сделка" – позиция открыта, можно добавлять юниты или закрывать сделку
+# Состояние "Открытая сделка" – позиция открыта, можно добавлять юниты или закрывать сделку.
 class TradeOpenState(StrategyState):
     async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
         last_entry = context.entry_prices[-1]
@@ -147,6 +150,7 @@ class TradeOpenState(StrategyState):
             context.exit_price = price
             try:
                 result = await order_for_close_position(context, connect, price)
+                logger.info(result)
                 logger.info(f"[{context.instrument_figi}] позиция закрыта {price:.4f}. Переход в состоянии ожидания.")
                 context.state = IdleState()
                 context.position_units = 0
@@ -186,7 +190,7 @@ class TradeOpenState(StrategyState):
 class StrategyContext:
     def __init__(self, history_instrument: HistoricInstrument, portfolio_size: float, n: int):
         """
-        :param history_instrument: Данные по инструрменту, который будет торговаться по этой стратегии
+        :param history_instrument: Данные по инструменту, который будет торговаться по этой стратегии
         :param portfolio_size: Размер портфеля (например, в долларах)
         :param n: Длина канала Дончяна (например, 20)
         """
@@ -240,7 +244,7 @@ class StrategyContext:
         result = await self.state.on_new_price(self, price, connect)
         return result
 
-    def current_position_info(self):
+    def current_position_info(self) -> dict[str, Any]:
         """
         Возвращает информацию о текущей позиции.
         """
@@ -250,13 +254,12 @@ class StrategyContext:
             "entry_prices": self.entry_prices,
             "quantity": self.quantity,
             "stop_levels": self.stop_levels,
-            'direction': self.direction,
+            'direction': self.direction.name if self.direction else None,
             "state": self.state.__class__.__name__,
             "atr": self.atr,
             "breakout_level_long": self.breakout_level_long,
             "breakout_level_short": self.breakout_level_short,
         }
-
 
     def update_atr(self, history_instrument: HistoricInstrument):
         """
@@ -269,8 +272,9 @@ class StrategyContext:
         self.exit_long_donchian = history_instrument.min_short_donchian
         self.exit_short_donchian = history_instrument.max_short_donchian
 
-    def update_portfolio_size(self, portfolio_size: int):
-        self.portfolio_size = portfolio_size
+    async def update_portfolio_size(self, connect: ConnectTinkoff):
+        result: PortfolioResponse = await connect.get_portfolio_by_id(ACCOUNT_ID)
+        self.portfolio_size = float(money_to_decimal(result.total_amount_portfolio))
 
     async def update_position(self, connect: ConnectTinkoff):
         await update_position(self, connect)

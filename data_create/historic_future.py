@@ -1,12 +1,11 @@
 import datetime
+import json
 import pickle as pkl
 
 import pandas as pd
-import json
-
-from tinkoff.invest import Future, HistoricCandle, MarketDataResponse, Quotation, MoneyValue
+from tinkoff.invest import Future, HistoricCandle, Quotation, MoneyValue
 from tinkoff.invest.schemas import BrandData
-from tinkoff.invest.utils import quotation_to_decimal, decimal_to_quotation
+from tinkoff.invest.utils import quotation_to_decimal
 
 
 class HistoricInstrument:
@@ -17,8 +16,7 @@ class HistoricInstrument:
     def __init__(self, instrument: Future = None, list_candles: list[HistoricCandle] = None) -> None:
         """Конструктор класса, вызывается либо с параметрами instriment, list_candles либо загружается из from_csv, path
         :param list_candles: список исторических свечей
-        :param instrument: объект класса Future - хранение основной информации об инструменте
-        :param from_csv: флаг, если True, то данные будут загружаются из csv"""
+        :param instrument: объект класса Future - хранение основной информации об инструменте"""
 
         df = []
 

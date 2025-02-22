@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import pickle
@@ -18,8 +19,10 @@ from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
 from config import CHAT_ID
 from data_create.historic_future import HistoricInstrument
-# from strategy.docnhian import StrategyContext
+from strategy.docnhian import StrategyContext
 from trad.connect_tinkoff import ConnectTinkoff
+
+logger = logging.getLogger(__name__)
 
 
 def market_data_response_to_string(msg: MarketDataResponse) -> str:
@@ -138,8 +141,8 @@ def new_save_subs(dict_subs):
 
 def get_all_path_subs(dict_instruments: dict[str, list[str]]) -> tuple[list[str]]:
     """
-    Получает пути к папкам с данными фьючерсов на которые подписаны в данный момент.
-    Словарь выглядит таким образом {figi: [uid, name, ticker], ...}
+    Получает пути к папкам с данными фьючерсов, на которые подписаны в данный момент.
+    Словарь выглядит таким образом {figi: [uid, name, ticker], …}
     :param dict_instruments: Словарь с инструментами.
     :return: Словарь с подписками.
     """
@@ -162,16 +165,17 @@ async def processing_last_price(last_price: LastPrice,
                                 connect: ConnectTinkoff
                                 ):
     """
-    Обрабатывает последнюю цену полученную в стриме.
-    :param last_price:
-    :param context:
+    Обрабатывает последнюю цену, полученную в стриме.
+    :param connect: Класс подключения к TinkoffInvestApi.
+    :param last_price: Цена последней сделки.
+    :param context: Стадия отслеживаемого инструмента.
     :return:
     """
     price = float(quotation_to_decimal(last_price.price))
     result = await context.on_new_price(price, connect)
     if result:
         text = (f'Смена состояния подписки на {context.state.__class__.__name__}\n'
-                f'{context.current_position_info()}')
+                f"{'\n'.join(f'{key}: {value}' for key, value in context.current_position_info().items())}")
         return text
 
 
@@ -199,17 +203,17 @@ def psr_to_string(psr: PortfolioStreamResponse) -> str:
     return string, portfolio.total_amount_portfolio
 
 
-def posr_to_string(posr: PositionsStreamResponse) -> str:
+def position_to_string(position: PositionsStreamResponse) -> str:
     string = ''
-    if posr.subscriptions:
+    if position.subscriptions:
         string += 'Оформлена подписка на стрим позиций'
 
-    if pos := posr.position:
+    if pos := position.position:
         if futures := pos.futures:
             for fut in futures:
                 string += (f'Изменение позиции по фьючерсу {figi_to_name(fut.figi)}\n'
                            f'Количество бумаг заблокированных выставленными заявками: {fut.blocked}\n'
-                           f'Текущий незаблокированный баланс: {fut.balance}\n')
+                           f'Текущий не заблокированный баланс: {fut.balance}\n')
         dt_moscow = pos.date.astimezone(ZoneInfo("Europe/Moscow"))
         string += f'Дата: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n'
 
@@ -222,8 +226,8 @@ def posr_to_string(posr: PositionsStreamResponse) -> str:
                            f'Заблокированное количество валютный позиций: '
                            f'{money_to_decimal(m.blocked_value):.2f} '
                            f'{m.blocked_value.currency}')
-        if posr.ping:
-            dt_moscow = posr.ping.time.astimezone(ZoneInfo("Europe/Moscow"))
+        if position.ping:
+            dt_moscow = position.ping.time.astimezone(ZoneInfo("Europe/Moscow"))
             string += f'Получен пинг:\n' \
                       f'Time: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n'
     return string
@@ -239,8 +243,7 @@ async def update_strategy_by_price(last_price: LastPrice, connect: ConnectTinkof
         if result:
             with open('dict_strategy_state.pkl', 'wb') as f:
                 pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
-            await bot.send_message(chat_id=CHAT_ID, text = result)
-
+            await bot.send_message(chat_id=CHAT_ID, text=result)
 
 
 def update_all_portfolio_size(portfolio_amount):
@@ -255,19 +258,21 @@ def update_all_portfolio_size(portfolio_amount):
 @lru_cache
 def figi_to_name(figi: str) -> str:
     with open('figi_to_name.json', 'r') as f:
-        figi_to_name: dict[str, str] = json.load(f)
-    return figi_to_name[figi]
+        name_dict: dict[str, str] = json.load(f)
+    return name_dict[figi]
 
 
-def calculation_quantity(price: float, portfolio: float, atr: float) -> int:
+def calculation_quantity(price_rub_one_point: float, portfolio: float, atr: float) -> int:
     """
     Вычисляет количество бумаг для покупки.
-    :param price: Цена покупки.
+    :param price_rub_one_point: Цена покупки.
     :param portfolio: Размер моего счёта.
     :param atr: Средний истинный диапазон за 14 дней.
     :return: Количество лотов для выставления ордера.
     """
-    quantity = math.ceil(0.01 * portfolio / (atr * price))
+    quantity = math.floor(0.01 * portfolio / (atr * price_rub_one_point))
+    if quantity == 0:
+        raise Exception(f'Кол-во лотов для покупки равно 0')
     return quantity
 
 
@@ -282,7 +287,7 @@ def tsr_to_string(trades_stream_response: TradesStreamResponse):
         text += (f'Информация об исполнении торгового поручения\n'
                  f'<b>{figi_to_name(trades.figi)}</b>\n'
                  f'Время создания: {dt_moscow.strftime("%Y-%m-%d %H:%M:%S")}\n'
-                 f"Направление: {'Лонг' if trades.direction.name == OrderDirection.ORDER_DIRECTION_BUY else 'Шорт'}\n\n")
+                 f"Направление: {'Лонг' if trades.direction == OrderDirection.ORDER_DIRECTION_BUY else 'Шорт'}\n\n")
         for trade in trades.trades:
             text += (f'Цена: {money_to_decimal(trade.price):.2f}\n'
                      f'Количество: {trade.quantity}\n')
