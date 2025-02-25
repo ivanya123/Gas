@@ -4,7 +4,8 @@ import pickle
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
-from tinkoff.invest import GetMarginAttributesResponse
+from tinkoff.invest import GetMarginAttributesResponse, PortfolioResponse
+from tinkoff.invest.utils import money_to_decimal
 
 import bot.keyboard as kb
 import utils as ut
@@ -50,8 +51,10 @@ async def subscribe(message: Message):
 
             with open('dict_strategy_state.pkl', 'rb') as f:
                 dict_strategy_subscribe: dict[str, StrategyContext] = pickle.load(f)
+            my_portfolio: PortfolioResponse = await connect.get_portfolio_by_id(ACCOUNT_ID)
             dict_strategy_subscribe[new_historic_instrument.instrument_info.figi] = (
-                StrategyContext(new_historic_instrument, n=20, portfolio_size=220000)
+                StrategyContext(new_historic_instrument, n=20,
+                                portfolio_size=money_to_decimal(my_portfolio.total_amount_portfolio))
             )
             with open('dict_strategy_state.pkl', 'wb') as f:
                 pickle.dump(dict_strategy_subscribe, f)

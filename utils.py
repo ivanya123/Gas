@@ -7,20 +7,16 @@ import json
 import logging
 import math
 import os
-import pickle
 import uuid
+from decimal import Decimal
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot
-from tinkoff.invest import MarketDataResponse, LastPrice, PortfolioStreamResponse, PositionsStreamResponse, \
+from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, PositionsStreamResponse, \
     TradesStreamResponse, OrderDirection
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal
 
-from config import CHAT_ID
 from data_create.historic_future import HistoricInstrument
-from strategy.docnhian import StrategyContext
-from trad.connect_tinkoff import ConnectTinkoff
 
 logger = logging.getLogger(__name__)
 
@@ -160,25 +156,6 @@ def get_all_path_subs(dict_instruments: dict[str, list[str]]) -> tuple[list[str]
     return list_path_true
 
 
-async def processing_last_price(last_price: LastPrice,
-                                context: 'StrategyContext',
-                                connect: ConnectTinkoff
-                                ):
-    """
-    Обрабатывает последнюю цену, полученную в стриме.
-    :param connect: Класс подключения к TinkoffInvestApi.
-    :param last_price: Цена последней сделки.
-    :param context: Стадия отслеживаемого инструмента.
-    :return:
-    """
-    price = float(quotation_to_decimal(last_price.price))
-    result = await context.on_new_price(price, connect)
-    if result:
-        text = (f'Смена состояния подписки на {context.state.__class__.__name__}\n'
-                f"{'\n'.join(f'{key}: {value}' for key, value in context.current_position_info().items())}")
-        return text
-
-
 def psr_to_string(psr: PortfolioStreamResponse) -> str:
     string = ''
     if portfolio := psr.portfolio:
@@ -200,7 +177,7 @@ def psr_to_string(psr: PortfolioStreamResponse) -> str:
     if psr.subscriptions:
         string += 'Оформлена подписка на стрим портфолио'
 
-    return string, portfolio.total_amount_portfolio
+    return string, money_to_decimal(portfolio.total_amount_portfolio)
 
 
 def position_to_string(position: PositionsStreamResponse) -> str:
@@ -233,28 +210,6 @@ def position_to_string(position: PositionsStreamResponse) -> str:
     return string
 
 
-async def update_strategy_by_price(last_price: LastPrice, connect: ConnectTinkoff, bot: Bot):
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
-    if last_price.figi in dict_strategy_state:
-        result = await processing_last_price(last_price,
-                                             dict_strategy_state[last_price.figi],
-                                             connect)
-        if result:
-            with open('dict_strategy_state.pkl', 'wb') as f:
-                pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
-            await bot.send_message(chat_id=CHAT_ID, text=result)
-
-
-def update_all_portfolio_size(portfolio_amount):
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
-    for figi, context_strategy in dict_strategy_state.items():
-        context_strategy.update_portfolio_size(money_to_decimal(portfolio_amount))
-    with open('dict_strategy_state.pkl', 'wb') as f:
-        pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
-
-
 @lru_cache
 def figi_to_name(figi: str) -> str:
     with open('figi_to_name.json', 'r') as f:
@@ -262,7 +217,7 @@ def figi_to_name(figi: str) -> str:
     return name_dict[figi]
 
 
-def calculation_quantity(price_rub_one_point: float, portfolio: float, atr: float) -> int:
+def calculation_quantity(price_rub_one_point: Decimal, portfolio: Decimal, atr: Decimal) -> int:
     """
     Вычисляет количество бумаг для покупки.
     :param price_rub_one_point: Цена покупки.
@@ -270,9 +225,9 @@ def calculation_quantity(price_rub_one_point: float, portfolio: float, atr: floa
     :param atr: Средний истинный диапазон за 14 дней.
     :return: Количество лотов для выставления ордера.
     """
-    quantity = math.floor(0.01 * portfolio / (atr * price_rub_one_point))
+    quantity = math.floor(Decimal(0.01) * portfolio / (atr * price_rub_one_point))
     if quantity == 0:
-        raise Exception(f'Кол-во лотов для покупки равно 0')
+        raise Exception(f'Кол-во лотов для сделки равно 0')
     return quantity
 
 

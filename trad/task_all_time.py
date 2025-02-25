@@ -1,7 +1,7 @@
 from __future__ import annotations
+
 import asyncio
 import logging
-
 import pickle
 from decimal import Decimal
 from typing import Optional
@@ -9,18 +9,20 @@ from typing import Optional
 from aiogram import Bot
 from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, PositionsStreamResponse, TradesStreamResponse, \
     OrderTrades, OrderState, OrderDirection, OrderType, OrderExecutionReportStatus, GetFuturesMarginResponse, \
-    PostOrderResponse
+    PostOrderResponse, LastPrice, Quotation, PriceType
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal, decimal_to_quotation
 
-from strategy.docnhian import StrategyContext
-from trad.connect_tinkoff import ConnectTinkoff
-from data_create.historic_future import HistoricInstrument
-from config import CHAT_ID, ACCOUNT_ID, TOKEN_D
 import utils as ut
+from config import CHAT_ID, ACCOUNT_ID, TOKEN_D
+from data_create.historic_future import HistoricInstrument
+from trad.connect_tinkoff import ConnectTinkoff
+from typing import TYPE_CHECKING
 
-event_stop_stream_to_chat = asyncio.Event()
-event_update = asyncio.Event()
+if TYPE_CHECKING:
+    from strategy.docnhian import StrategyContext
+
 dict_status_instrument = {}
+global_info_dict = {}
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,7 @@ async def start_bot(connect: ConnectTinkoff, bot: Bot):
         dict_strategy_subscribe: dict[str, 'StrategyContext'] = pickle.load(f)
     instruments_id = [value.instrument_uid for value in dict_strategy_subscribe.values()]
     for value in dict_strategy_subscribe.values():
+        # TODO: изменить функцию обновления портфеля(чтоб загрузка была один раз)
         await value.update_portfolio_size(connect)
     with open('dict_strategy_state.pkl', 'wb') as f:
         pickle.dump(dict_strategy_subscribe, f)
@@ -52,31 +55,66 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot) -> None:
     """
     if connect.market_data_stream:
         while True:
-            msg: MarketDataResponse = await connect.queue.get()
-            logger.info(f'{ut.market_data_response_to_string(msg)}')
-            if last_price := msg.last_price:  # если есть последняя цена
-                instrument_figi = last_price.figi
-                current_task = update_tasks.get(instrument_figi)
-                if current_task and not current_task.done():  # если задача обновления статуса уже запущена.
-                    logger.debug(f'{instrument_figi} задача уже запущена')
-                    # Кладем последний цену в словарь обновления,
-                    # для возможности управления выставлением ордера в зависимости от новой цены инструмента.
-                    dict_last_price[instrument_figi] = last_price
-                else:  # если задача еще не запущена
-                    # Запускаем задачу обновления
-                    task = asyncio.create_task(ut.update_strategy_by_price(last_price, connect, bot))
-                    update_tasks[instrument_figi] = task  # Добавляем задачу в словарь
-                    # Создаем callback, который удаляет задачу из словаря при завершении задачи.
-                    task.add_done_callback(lambda t, key=instrument_figi: update_tasks.pop(key))
+            try:
+                msg: MarketDataResponse = await connect.queue.get()
+                logger.info(f'{ut.market_data_response_to_string(msg)}')
+                if last_price := msg.last_price:  # если есть последняя цена
+                    instrument_figi = last_price.figi
+                    current_task = update_tasks.get(instrument_figi)
+                    if current_task and not current_task.done():  # если задача обновления статуса уже запущена.
+                        logger.debug(f'{instrument_figi} задача уже запущена')
+                        # Кладем последний цену в словарь обновления,
+                        # для возможности управления выставлением ордера в зависимости от новой цены инструмента.
+                        dict_last_price[instrument_figi] = last_price.price
+                    else:  # если задача еще не запущена
+                        # Запускаем задачу обновления
+                        task = asyncio.create_task(update_strategy_by_price(last_price, connect, bot))
+                        update_tasks[instrument_figi] = task  # Добавляем задачу в словарь
+                        # Создаем callback, который удаляет задачу из словаря при завершении задачи.
+                        task.add_done_callback(lambda t, key=instrument_figi: update_tasks.pop(key))
 
-            if msg.trading_status:
-                msg_str = ut.market_data_response_to_string(msg) + '\n'
-                dict_status_instrument[msg.trading_status.instrument_uid] = msg.trading_status.trading_status
-                await bot.send_message(chat_id=CHAT_ID, text=msg_str)
+                if msg.trading_status:
+                    msg_str = ut.market_data_response_to_string(msg) + '\n'
+                    dict_status_instrument[msg.trading_status.instrument_uid] = msg.trading_status.trading_status
+                    await bot.send_message(chat_id=CHAT_ID, text=msg_str)
 
-            if msg.subscribe_info_response or msg.subscribe_last_price_response:
-                msg_str = ut.market_data_response_to_string(msg) + '\n'
-                await bot.send_message(chat_id=CHAT_ID, text=msg_str)
+                if msg.subscribe_info_response or msg.subscribe_last_price_response:
+                    msg_str = ut.market_data_response_to_string(msg) + '\n'
+                    await bot.send_message(chat_id=CHAT_ID, text=msg_str)
+            except Exception as e:
+                logger.exception(f'В функции обработки стрима произошла ошибка: {e}')
+
+
+async def update_strategy_by_price(last_price: LastPrice, connect: ConnectTinkoff, bot: Bot):
+    with open('dict_strategy_state.pkl', 'rb') as f:
+        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
+    if last_price.figi in dict_strategy_state:
+        result = await processing_last_price(last_price,
+                                             dict_strategy_state[last_price.figi],
+                                             connect)
+        if result:
+            with open('dict_strategy_state.pkl', 'wb') as f:
+                pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
+            await bot.send_message(chat_id=CHAT_ID, text=result)
+
+
+async def processing_last_price(last_price: LastPrice,
+                                context: 'StrategyContext',
+                                connect: ConnectTinkoff
+                                ):
+    """
+    Обрабатывает последнюю цену, полученную в стриме.
+    :param connect: Класс подключения к TinkoffInvestApi.
+    :param last_price: Цена последней сделки.
+    :param context: Стадия отслеживаемого инструмента.
+    :return:
+    """
+    price = quotation_to_decimal(last_price.price)
+    result = await context.on_new_price(price, connect)
+    if result:
+        text = (f'Смена состояния подписки на {context.state.__class__.__name__}\n'
+                f"{'\n'.join(f'{key}: {value}' for key, value in context.current_position_info().items())}")
+        return text
 
 
 async def processing_stream_portfolio(connect: ConnectTinkoff, bot: Bot):
@@ -85,7 +123,7 @@ async def processing_stream_portfolio(connect: ConnectTinkoff, bot: Bot):
         if isinstance(response, PortfolioStreamResponse):
             text, portfolio_amount = ut.psr_to_string(response)
             await bot.send_message(chat_id=CHAT_ID, text=text)
-            ut.update_all_portfolio_size(portfolio_amount)
+            global_info_dict['portfolio_size'] = portfolio_amount
         if isinstance(response, PositionsStreamResponse):
             text = ut.position_to_string(response)
             if not response.ping:
@@ -101,7 +139,7 @@ async def update_data(connect: ConnectTinkoff, bot: Bot):
         new_historic = HistoricInstrument(instrument=info, list_candles=historic)
         new_historic.create_donchian_canal(context_strategy.n, int(context_strategy.n / 2))
         path = ut.create_folder_and_save_historic_instruments(new_historic)
-        dict_strategy_state[figi].update_atr(new_historic)
+        dict_strategy_state[figi].update_data(new_historic)
         text += f'Данные для <b>{new_historic.instrument_info.name}</b> обновлены и сохранены в {path}\n\n'
     with open('dict_strategy_state.pkl', 'wb') as f:
         pickle.dump(dict_strategy_state, f)
@@ -164,6 +202,15 @@ async def processing_trades_stream(connect: ConnectTinkoff, bot: Bot):
             await bot.send_message(chat_id=CHAT_ID, text=ut.tsr_to_string(trades_stream_response))
 
 
+def update_all_portfolio_size(portfolio_amount):
+    with open('dict_strategy_state.pkl', 'rb') as f:
+        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
+    for figi, context_strategy in dict_strategy_state.items():
+        context_strategy.update_portfolio_size(money_to_decimal(portfolio_amount))
+    with open('dict_strategy_state.pkl', 'wb') as f:
+        pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
+
+
 async def waiting_order_accept(context: 'StrategyContext', quantity_result: int, quantity_now: int):
     while dict_queue.get(context.instrument_figi) is None:
         logger.debug(f'Ожидаем подтверждения ордера {ut.figi_to_name(context.instrument_figi)}')
@@ -178,110 +225,161 @@ async def waiting_order_accept(context: 'StrategyContext', quantity_result: int,
     return my_trades
 
 
+def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal) -> bool:
+    last_price = money_to_decimal(order_state.initial_order_price)
+    direction = order_state.direction
+    new_price = quotation_to_decimal(new_price)
+    if direction == OrderDirection.ORDER_DIRECTION_BUY:
+        return new_price >= (last_price + (atr / Decimal(2)))
+    else:
+        return new_price <= (last_price - (atr / Decimal(2)))
+
+
 async def place_order_with_status_check(connect: ConnectTinkoff,
                                         context: 'StrategyContext',
-                                        price: float,
+                                        price: Decimal,
                                         long: bool,
-                                        timeout: int = 30,
-                                        retry_interval: int = 10
-                                        ) -> Optional[OrderTrades | OrderState]:
+                                        count: int = 500,
+                                        retry_interval: int = 30
+                                        ) -> Optional[list[OrderState]]:
     """
-   Выставляет ордер и ждёт его подтверждения. При таймауте запрашивает статус ордера.
-   Если ордер в состоянии ожидания (pending), повторно ждёт подтверждения.
-
-   :param connect: объект подключения (например, ConnectTinkoff)
-   :param context: объект StrategyContext для текущего инструмента.
-   :param price: Цена, по которой выставляется ордер.
-   :param long: Направление ордера (True - лонг, False - шорт).
-   :param timeout: Время ожидания подтверждения ордера (в секундах).
-   :param retry_interval: Интервал между повторными попытками (в секундах)
-   :return: статус ордера или ошибка, если ордер отменён/не принят.
-   """
+    Выставляет ордер и ждёт его подтверждения.
+    :param connect: объект подключения (например, ConnectTinkoff)
+    :param context: объект StrategyContext для текущего инструмента.
+    :param price: Цена, по которой выставляется ордер.
+    :param long: Направление ордера (True - лонг, False - шорт).
+    :param count: Кол-во попыток подтверждения ордера.
+    :param retry_interval: Интервал между повторными попытками (в секундах)
+    :return: статус ордера или ошибка, если ордер отменён/не принят.
+    """
     order_id = ut.generate_order_id()
+    if 'portfolio_size' in global_info_dict:
+        portfolio_size = global_info_dict['portfolio_size']
+    else:
+        portfolio_size = await connect.get_portfolio_by_id(ACCOUNT_ID)
+        portfolio_size = money_to_decimal(portfolio_size.total_amount_portfolio)
 
-    price_rub_point, price_in_rub = await get_rub_price(connect, context, price)
-
+    price_rub_point, price_in_rub, min_price_increment = await get_rub_price(connect, context, price)
+    # Гарантирует что, цена будет кратна минимальному шагу.
+    price = (price // min_price_increment) * min_price_increment
     logger.info(f'Цена в рублях: {price_in_rub}')
     order_params = {
-        'instrument_id': context.instrument_uid,
-        'quantity': ut.calculation_quantity(price_rub_point, context.portfolio_size, context.atr),
-        'price': decimal_to_quotation(Decimal(price)),
+        'instrument_id': context.history_instrument.instrument_info.uid,
+        'quantity': ut.calculation_quantity(price_rub_one_point=price_rub_point,
+                                            portfolio=portfolio_size,
+                                            atr=context.history_instrument.atr),
+        'price': decimal_to_quotation(price),
         'direction': OrderDirection.ORDER_DIRECTION_BUY if long else OrderDirection.ORDER_DIRECTION_SELL,
         'account_id': ACCOUNT_ID,
         'order_type': OrderType.ORDER_TYPE_LIMIT,
         'order_id': order_id
     }
-    logger.info(f'Выставляем ордер по {ut.figi_to_name(context.instrument_figi)}'
+    logger.info(f'Выставляем ордер по {context.history_instrument.instrument_info.name}'
                 f' на {order_params["quantity"]} лотов по цене {decimal_to_quotation(Decimal(price))}')
-    logger.info(f"params: {'\n'.join(f'{k}: {v}' for k, v in order_params.items())}")
+    # logger.info(f"params: {'\n'.join(f'{k}: {v}' for k, v in order_params.items())}")
     result: PostOrderResponse = await connect.post_order(**order_params)
     order_response_id = result.order_id
     logger.info(f'Получен ответ по выставленному поручению'
-                f' {ut.figi_to_name(context.instrument_figi)} {result.execution_report_status}')
+                f' {context.history_instrument.instrument_info.name} {result.execution_report_status}')
 
-    count = 0
-    while True:
+    await asyncio.sleep(10)
+    list_order_state = []
+    order_state = None
+    for _ in range(count):
         try:
-            logger.info(f'Ждем подтверждения ордера {timeout} сек.')
+            logger.info(f'Ждем подтверждения ордера {count} раз с интервалом {retry_interval} сек.')
             order_state: OrderState = await connect.client.orders.get_order_state(order_id=order_response_id,
                                                                                   account_id=ACCOUNT_ID)
-
+            # Обработка успешно выполненного ордера
             if order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_FILL:
                 logger.info(f'Заявка выполнена {order_state}')
-                return order_state
-
+                list_order_state.append(order_state)
+                return list_order_state
+            # Обработка нового ордера, без выполненных лотов
             elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_NEW:
-                if count == 10:
-                    logger.info(f'Заявка не выполнена {order_state}, отменяем')
-                    await connect.client.orders.cancel_order(order_id=order_response_id,
-                                                             account_id=ACCOUNT_ID)
-                    return order_state
+                if context.history_instrument.instrument_info.figi in dict_last_price:
+                    if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
+                                     order_state=order_state,
+                                     atr=context.history_instrument.atr):
+                        new_order = await replace_order(connect, context,
+                                                        order_response_id, order_state,
+                                                        price, min_price_increment)
+                        order_response_id = new_order.order_id
+                        list_order_state.append(order_state)
+                        continue
                 logger.info(f'Заявка ожидает выполнения {order_state}, повторяем попытку через {retry_interval} сек.')
-                count += 1
                 await asyncio.sleep(retry_interval)
                 continue
-
+            # Обработка частично выполненного ордера
             elif (order_state.execution_report_status ==
                   OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL):
+                if context.history_instrument.instrument_info.figi in dict_last_price:
+                    if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
+                                     order_state=order_state,
+                                     atr=context.history_instrument.atr):
+                        new_order = await replace_order(connect, context,
+                                                        order_response_id, order_state,
+                                                        price, min_price_increment)
+                        order_response_id = new_order.order_id
+                        list_order_state.append(order_state)
+                        continue
                 logger.info(f'Заявка частично выполнена {order_state}, повторяем попытку через {retry_interval} сек.')
                 logger.info(f'Выполнено лотов {order_state.lots_executed} / {order_state.lots_requested}')
-                count += 1
-                if count == 10:
-                    logger.info(f'Заявка не выполнена {order_state}, отменяем')
-                    await connect.client.orders.cancel_order(order_response_id)
-                    return order_state
-                else:
-                    await asyncio.sleep(retry_interval)
+                await asyncio.sleep(retry_interval)
                 continue
-            else:
-                logger.info(f'Заявка не выполнена {order_state.execution_report_status.name}')
-                raise Exception(f'Заявка не выполнена {order_state.execution_report_status.name}')
+            # Обработка отмененного ордера.
+            elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_CANCELLED:
+                logger.info(f'Заявка отменена {order_state.execution_report_status.name}')
+                if order_state.lots_executed > 0:
+                    logger.info(f'Выполнено лотов {order_state.lots_executed} / {order_state.lots_requested}')
+                    list_order_state.append(order_state)
+                    return list_order_state
+                else:
+                    logger.info(f'Заявка отменена {order_state.execution_report_status.name}')
+                    logger.info(f'Выполнено 0 лотов')
+                    raise Exception(f'Заявка не выполнена {order_state.execution_report_status.name}')
+            # Обработка отклоненного ордера.
+            elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_REJECTED:
+                logger.info(f'Заявка отклонена {order_state.execution_report_status.name}')
+                raise Exception(f'Заявка отклонена {order_state.execution_report_status.name}')
+
+        # Обработка ошибок во время выставления ордера.
         except Exception as e:
-            logger.info(f'Заявка не выполнена {e}')
-            raise Exception(f'Заявка не выполнена {e}')
+            if order_state:
+                if order_state.lots_executed > 0:
+                    logger.info(f'Выполнено лотов {order_state.lots_executed} / {order_state.lots_requested}')
+                    logger.error(f'При ожидании заявки произошла ошибка {e}')
+                    list_order_state.append(order_state)
+                    return list_order_state
+                else:
+                    raise Exception(f'Заявка не выполнена {e}')
+    # Обработка ситуации когда бот не дождался выполнения заявки.
+    else:
+        logger.info(f'Заявка не выполнена за {count * retry_interval} сек.')
+        try:
+            time_cancel = await connect.client.orders.cancel_order(account_id=ACCOUNT_ID, order_id=order_response_id)
+            logger.info(f'Заявка на {context.history_instrument.instrument_info.name} '
+                        f'{order_state.lots_executed} / {order_state.lots_requested} '
+                        f'лотов отменена в {time_cancel}')
+        except Exception as e:
+            logger.error(f'При отмене заявки произошла ошибка {e}')
+        if order_state.lots_executed > 0:
+            logger.info(f'Выполнено лотов {order_state.lots_executed} / {order_state.lots_requested}')
+            list_order_state.append(order_state)
+            return list_order_state
+        else:
+            raise Exception(f'Заявка не выполнена за {count * retry_interval} сек.')
 
 
-async def get_rub_price(connect, context, price):
-    margin_response: GetFuturesMarginResponse = await connect.client.instruments.get_futures_margin(
-        instrument_id=context.instrument_uid
-    )
-    min_price_increment = margin_response.min_price_increment
-    min_price_increment_amount = margin_response.min_price_increment_amount
-
-    price_rub_point = (1 / float(quotation_to_decimal(min_price_increment))) * float(
-        quotation_to_decimal(min_price_increment_amount))
-
-    price_in_rub = ((Decimal(price) / quotation_to_decimal(min_price_increment))
-                    * quotation_to_decimal(min_price_increment_amount))
-    return price_rub_point, price_in_rub
-
-
-async def order_for_close_position(context: 'StrategyContext', connect: ConnectTinkoff, price: float, timeout=20,
-                                   retry_interval=10):
-    logger.info(f'Закрытие позиции {ut.figi_to_name(context.instrument_figi)} по цене {price}')
+async def order_for_close_position(context: 'StrategyContext', connect: ConnectTinkoff,
+                                   price: Decimal, count: int = 100,
+                                   retry_interval=10) -> Optional[list[OrderState]]:
+    logger.info(f'Закрытие позиции {context.history_instrument.instrument_info.name} по цене {price}')
     order_id = ut.generate_order_id()
+    min_price_increment = quotation_to_decimal(context.history_instrument.instrument_info.min_price_increment)
+    price = (price // min_price_increment) * min_price_increment
     order_params = {
-        'instrument_id': context.instrument_uid,
+        'instrument_id': context.history_instrument.instrument_info.uid,
         'quantity': context.quantity,
         'price': price,
         'direction': context.close_direction,
@@ -291,48 +389,129 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
     }
     result = await connect.post_order(**order_params)
     logger.info(f'Получен ответ по выставленному поручению'
-                f' {ut.figi_to_name(context.instrument_figi)} {result.execution_report_status}')
-
-    async def wait_for_order_accept():
-        return await waiting_order_accept(context)
-
-    count = 0
-    while True:
+                f' {context.history_instrument.instrument_info.name} {result.execution_report_status}')
+    order_response_id = result.order_id
+    list_order_state = []
+    order_state = None
+    await asyncio.sleep(retry_interval)
+    for _ in range(count):
         try:
-            logger.info(f'Ждем подтверждения ордера {timeout} сек.')
-            order_status: OrderTrades = await asyncio.wait_for(wait_for_order_accept(), timeout=timeout)
-            logger.info(f"Заявка выполнена {order_status}")
-            return order_status
-        except asyncio.TimeoutError:
-            logger.info(f'Таймаут истек, запрашиваем статус ордера')
-            order_state: OrderState = await connect.client.orders.get_order_state(order_id)
+            order_state = await connect.client.orders.get_order_state(order_id=order_response_id,
+                                                                      account_id=ACCOUNT_ID)
             if order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_FILL:
-                logger.info(f'Заявка выполнена {order_state}')
-                return order_state
-            elif (order_state.execution_report_status
-                  == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL) or (
-                    order_state.execution_report_status
-                    == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_NEW
-            ):
-                logger.info(f'Заявка частично выполнена {order_state}, повторяем попытку через {retry_interval} сек.')
-                count += 1
-                if count == 10:
-                    logger.info(f'Заявка выполнена частично или не начала выполнение {order_state}, отменяем')
-                    await connect.client.orders.cancel_order(order_id)
-                    raise Exception(f'Заявка не выполнена полностью {order_state}')
+                logger.info(f'Позиция {context.history_instrument.instrument_info.name} закрыта')
+                list_order_state.append(order_state)
+                return list_order_state
+
+            elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_REJECTED:
+                logger.info(f'Закрытие позиции: Заявка отклонена {order_state.execution_report_status.name}')
+                raise Exception(f'Закрытие позиции: Заявка отклонена {order_state.execution_report_status.name}')
+
+            elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_CANCELLED:
+                logger.info(f'Закрытие позиции: Заявка отменена {order_state.execution_report_status.name}')
+                if order_state.lots_executed > 0:
+                    list_order_state.append(order_state)
+                    logger.info(f'Закрытие позиции: Позиция {context.history_instrument.instrument_info.name} закрыта'
+                                f'не полностью {order_state.lots_executed} / {order_state.lots_requested} лотов')
+                    list_order_state.append(False)
+                    return list_order_state
                 else:
-                    await asyncio.sleep(retry_interval)
-                    continue
-            else:
-                logger.info(f'Заявка не выполнена {order_state}')
-                raise Exception(f'Заявка не выполнена {order_state}')
+                    raise Exception(f'Закрытие позиции: Заявка отменена {order_state.execution_report_status.name}')
+
+            elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_NEW:
+                if context.history_instrument.instrument_info.figi in dict_last_price:
+                    if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
+                                     order_state=order_state,
+                                     atr=context.history_instrument.atr):
+                        new_order = await replace_order(connect=connect, context=context,
+                                                        order_response_id=order_response_id,
+                                                        order_state=order_state, price=price,
+                                                        min_price_increment=min_price_increment)
+                        order_response_id = new_order.order_id
+                        list_order_state.append(order_state)
+                        await asyncio.sleep(retry_interval)
+                        continue
+                logger.info(f'Закрытие позиции: Заявка ожидает выполнения {order_state.execution_report_status.name}')
+                await asyncio.sleep(retry_interval)
+                continue
+
+            elif (order_state.execution_report_status ==
+                  OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL):
+                if context.history_instrument.instrument_info.figi in dict_last_price:
+                    if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
+                                     order_state=order_state,
+                                     atr=context.history_instrument.atr):
+                        new_order = await replace_order(connect=connect, context=context,
+                                                        order_response_id=order_response_id,
+                                                        order_state=order_state, price=price,
+                                                        min_price_increment=min_price_increment)
+                        order_response_id = new_order.order_id
+                        list_order_state.append(order_state)
+                        await asyncio.sleep(retry_interval)
+                        continue
+                logger.info(f'Закрытие позиции: Заявка частично выполнена {order_state.execution_report_status.name}')
+                await asyncio.sleep(retry_interval)
+                continue
+
+        except Exception as e:
+            if order_state:
+                if order_state.lots_executed > 0:
+                    list_order_state.append(order_state)
+                    list_order_state.append(False)
+                    logger.error(f'Закрытие позиции: При выполнении заявки произошла ошибка {e}')
+                    return list_order_state
+                else:
+                    raise Exception(f'Закрытие позиции: Заявка не выполнена {e}')
+
+    else:
+        logger.info(f'Закрытие позиции: Заявка не выполнена за {count * retry_interval} сек.')
+        try:
+            time_cancel = await connect.client.orders.cancel_order(account_id=ACCOUNT_ID, order_id=order_response_id)
+            logger.info(f'Закрытие позиции: Заявка на {context.history_instrument.instrument_info.name} '
+                        f'{order_state.lots_executed} / {order_state.lots_requested} '
+                        f'лотов отменена в {time_cancel}')
+            list_order_state.append(order_state)
+            list_order_state.append(False)
+            return list_order_state
+        except Exception as e:
+            raise Exception(f'При отмене заявки произошла ошибка {e}')
 
 
-async def update_position(context: 'StrategyContext', connect: ConnectTinkoff):
-    result = await connect.get_portfolio_by_id(ACCOUNT_ID)
-    for position in result.positions:
-        if position.figi == context.instrument_figi:
-            context.quantity = round(quotation_to_decimal(position.quantity), 1)
+async def replace_order(connect, context, order_response_id, order_state, price, min_price_increment):
+    logger.info(f'Цена изменилась, меняем цену ордера на величину {context.history_instrument.atr}')
+    new_price = (price + (context.history_instrument.atr / Decimal(2)) if
+                 order_state.direction == OrderDirection.ORDER_DIRECTION_BUY
+                 else price - (context.history_instrument.atr / Decimal(2)))
+    new_order_id = ut.generate_order_id()
+    new_price = (new_price // min_price_increment) * min_price_increment
+    order_params = {
+        'account_id': ACCOUNT_ID,
+        'order_id': order_response_id,
+        'price': decimal_to_quotation(new_price),
+        'quantity': order_state.lots_requested - order_state.lots_executed,
+        'idempotency_key': new_order_id,
+        'price_type': PriceType.PRICE_TYPE_POINT
+    }
+    new_order = await connect.client.orders.replace_order(**order_params)
+    return new_order
+
+
+async def get_rub_price(connect, context, price) -> tuple[Decimal, Decimal, Decimal]:
+    margin_response: GetFuturesMarginResponse = await connect.client.instruments.get_futures_margin(
+        instrument_id=context.instrument_uid
+    )
+    min_price_increment = margin_response.min_price_increment
+    min_price_increment_amount = margin_response.min_price_increment_amount
+
+    price_rub_point = ((Decimal(1) / quotation_to_decimal(min_price_increment)) *
+                       quotation_to_decimal(min_price_increment_amount))
+    price_rub_point = Decimal(price_rub_point)
+
+    price_in_rub = ((Decimal(price) / quotation_to_decimal(min_price_increment))
+                    * quotation_to_decimal(min_price_increment_amount))
+    price_in_rub = Decimal(price_in_rub)
+
+    return price_rub_point, price_in_rub, quotation_to_decimal(min_price_increment)
 
 
 if __name__ == '__main__':

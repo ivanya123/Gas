@@ -1,23 +1,60 @@
 from __future__ import annotations
+
 import abc
+import asyncio
+import datetime
 import pickle
+from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
-from tinkoff.invest import OrderTrades, OrderState, OrderDirection, PortfolioResponse
-from tinkoff.invest.utils import money_to_decimal
+from tinkoff.invest import OrderState, OrderDirection, PortfolioResponse, GetOperationsByCursorRequest, OperationType, \
+    GetOperationsByCursorResponse, AsyncClient, PortfolioPosition, OperationItem, OperationState
+from tinkoff.invest.utils import money_to_decimal, now, quotation_to_decimal
 
 import utils as ut
 from bot.telegram_bot import logger
-from config import ACCOUNT_ID
+from config import ACCOUNT_ID, TOKEN_D, TOKEN_TEST
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
-from trad.task_all_time import place_order_with_status_check, update_position, order_for_close_position
+from trad.task_all_time import place_order_with_status_check, order_for_close_position
+
+
+def update_strategy_context(my_context: 'StrategyContext',
+                            result: list[OrderState],
+                            long: bool):
+    entry_price = Decimal(sum(money_to_decimal(x.initial_security_price) for x in result) / len(result))
+    my_context.position_units += 1
+    my_context.state = TradeOpenState()
+    if long:
+        my_context.long = True
+        my_context.short = False
+        my_context.stop_levels.append(entry_price - Decimal(0.5) * my_context.history_instrument.atr)
+    else:
+        my_context.long = False
+        my_context.short = True
+        my_context.stop_levels.append(entry_price + Decimal(0.5) * my_context.history_instrument.atr)
+    my_context.quantity = Decimal(sum(x.lots_executed for x in result))
+    my_context.order_state.append(result)
+    if my_context.position_units == 1:
+        logger.info(
+            f"[{my_context.history_instrument.instrument_info.name} открыта позиция "
+            f"{'long' if my_context.long else 'short'} точка входа {entry_price:.4f}"
+        )
+        my_context.start_position_date = min(x.order_date for x in result)
+    elif 1 < my_context.position_units <= 4:
+        logger.info(
+            f"[{my_context.history_instrument.instrument_info.name} увеличение позиции {my_context.position_units} "
+            f"{'long' if my_context.long else 'short'} точка входа {entry_price:.4f}"
+        )
 
 
 # Базовый класс для состояний стратегии
 class StrategyState(abc.ABC):
     @abc.abstractmethod
-    async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
+    async def on_new_price(self, context: 'StrategyContext',
+                           price: float,
+                           connect: ConnectTinkoff):
         """
         Обработка нового ценового обновления и переход к следующему состоянию, если необходимо.
         """
@@ -26,198 +63,170 @@ class StrategyState(abc.ABC):
 
 # Состояние "Ожидание пробоя" – нет открытой сделки, ждём пробоя канала
 class IdleState(StrategyState):
-    async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
-        if price >= context.breakout_level_long + context.tick_size - 1:  # TODO: Убрать -1
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] сработал пробой канала {price:.2f} - long")
-            entry = price
+    async def on_new_price(self, context: 'StrategyContext',
+                           price: Decimal,
+                           connect: ConnectTinkoff):
+        # Проверяем пробой канала на лонг.
+        if price >= context.breakout_level_long + context.history_instrument.tick_size:
+            logger.info(f"{context.history_instrument.instrument_info.name} сработал пробой канала {price:.2f} - long")
+            entry: Decimal = context.breakout_level_long + context.history_instrument.tick_size
             try:
-                result: OrderTrades | OrderState = await place_order_with_status_check(connect=connect, context=context,
-                                                                                       price=price, long=True)
-                context.entry_prices.append(entry)
-                context.position_units = 1
-                context.stop_levels.append(entry - 0.5 * context.atr)
-                context.state = TradeOpenState()
-                context.long = True
-                context.quantity = (result.lots_executed if isinstance(result, OrderState)
-                                    else sum(i.quantity for i in result.trades))
-                logger.info(f"[{context.instrument_figi}] Trade opened at long {entry:.4f}")
+                result: list[OrderState] = await place_order_with_status_check(connect=connect, context=context,
+                                                                               price=entry, long=True)
+                update_strategy_context(my_context=context, result=result, long=True)
                 return True
             except Exception as e:
-                logger.info(f'При выставлении ордера произошла ошибка{e}')
+                logger.error(f'При выставлении ордера произошла ошибка{e}')
             return False
 
-        elif price < context.breakout_level_short - context.tick_size:
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] сработал пробой канала {price:.2f} - short")
-            entry = price
-            try:
-                result = await place_order_with_status_check(connect=connect, context=context, price=price, long=False)
-                context.entry_prices.append(entry)
-                context.position_units = 1
-                context.stop_levels.append(entry + 0.5 * context.atr)
-                context.state = TradeOpenState()
-                context.short = True
-                context.quantity = (result.lots_executed if isinstance(result, OrderState)
-                                    else sum(i.quantity for i in result.trades))
-                logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] Открыта позиция в шорт {entry:.4f}")
+        # Проверяем пробой канала на шорт.
+        elif price < context.breakout_level_short - context.history_instrument.tick_size:
+            logger.info(f"{context.history_instrument.instrument_info.name} сработал пробой канала {price:.2f} - short")
+            entry = context.breakout_level_short - context.history_instrument.tick_size
+            try:  # Выставление ордера и изменение статуса позиции.
+                result: list[OrderState] = await place_order_with_status_check(connect=connect, context=context,
+                                                                               price=entry, long=False)
+                update_strategy_context(my_context=context, result=result, long=False)
                 return True
             except Exception as e:
-                logger.info(e)
+                logger.error(f'При выставлении ордера произошла ошибка{e}')
                 return False
         else:
             return False
+
+
+def close_context(context: 'StrategyContext') -> None:
+    context.start_position_date = None
+    context.long = None
+    context.short = None
+    context.max_units = 4
+    context.position_units = 0
+    context.entry_prices = []
+    context.stop_levels = []
+    context.quantity = Decimal(0)
+    context.portfolio_position = None
+    context.order_state = []
+    context.operation_list = []
+    context.state = IdleState()
+    context.no_close = None
 
 
 # Состояние "Открытая сделка" – позиция открыта, можно добавлять юниты или закрывать сделку.
 class TradeOpenState(StrategyState):
+
     async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
-        last_entry = context.entry_prices[-1]
-        if context.position_units < context.max_units and price >= last_entry + 0.5 * context.atr and context.long:
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}]"
-                        f" переход на этап {context.position_units + 1} - {price:.2f} - long")
+        last_entry: Decimal = context.entry_prices[-1]
+
+        # Проверяем условие для увеличения позиции на лонг.
+        if (context.position_units < context.max_units
+                and price >= last_entry + (Decimal(0.5) * context.history_instrument.atr)
+                and context.long):
+            logger.info(f"{context.history_instrument.instrument_info.name} "
+                        f"переход на этап {context.position_units + 1} - {price:.2f} - long")
             try:
-                result = await place_order_with_status_check(connect=connect, context=context, price=price, long=True)
-                new_entry = price
-                context.entry_prices.append(new_entry)
-                context.position_units += 1
-                context.stop_levels.append(new_entry - 0.5 * context.atr)
-                context.quantity += (result.lots_executed if isinstance(result, OrderState)
-                                     else sum(i.quantity for i in result.trades))
-                print(f"[{context.instrument_figi}] Added unit: now {context.position_units} units at {new_entry:.4f}")
+                entry: Decimal = last_entry + (Decimal(0.5) * context.history_instrument.atr)
+                result: list[OrderState] = await place_order_with_status_check(connect=connect, context=context,
+                                                                               price=entry, long=True)
+                update_strategy_context(my_context=context, result=result, long=True)
                 return True
             except Exception as e:
-                logger.info(e)
-                return False
-        elif context.position_units < context.max_units and price <= last_entry - 0.5 * context.atr and context.short:
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}]"
-                        f" переход на этап {context.position_units + 1} - {price:.2f} - short")
-            new_entry = price
-            try:
-                result = await place_order_with_status_check(connect=connect, context=context, price=price, long=False)
-                context.entry_prices.append(new_entry)
-                context.position_units += 1
-                context.stop_levels.append(new_entry + 0.5 * context.atr)
-                context.quantity += (result.lots_executed if isinstance(result, OrderState)
-                                     else sum(i.quantity for i in result.trades))
-                logger.info(
-                    f"[{ut.figi_to_name(context.instrument_figi)}]"
-                    f" Новый этап {context.position_units} новая {new_entry:.4f}")
-                return True
-            except Exception as e:
-                logger.info(e)
-                return False
-        elif context.position_units == context.max_units and price >= last_entry - 0.5 * context.atr and context.long:
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}]"
-                        f" переход на последний этап {context.position_units + 1} - {price:.2f} - short")
-            new_entry = price
-            try:
-                result = await place_order_with_status_check(connect=connect, context=context, price=price, long=True)
-                context.entry_prices.append(new_entry)
-                context.position_units += 1
-                context.stop_levels.append(context.exit_long_donchian if
-                                           context.exit_long_donchian > (new_entry + 0.5 * context.atr)
-                                           else new_entry + 0.5 * context.atr)
-                context.quantity += (result.lots_executed if isinstance(result, OrderState)
-                                     else sum(i.quantity for i in result.trades))
-                logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] Последний этап"
-                            f" {context.position_units} новая цена {new_entry:.4f}")
-                return True
-            except Exception as e:
-                logger.info(e)
-                return False
-        elif context.position_units == context.max_units and price <= last_entry + 0.5 * context.atr and context.short:
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}]"
-                        f" переход на последний этап {context.position_units + 1} - {price:.2f} - short")
-            new_entry = price
-            try:
-                result = await place_order_with_status_check(connect=connect, context=context, price=price, long=True)
-                context.entry_prices.append(new_entry)
-                context.position_units += 1
-                context.stop_levels.append(context.exit_long_donchian if
-                                           context.exit_long_donchian < (new_entry + 0.5 * context.atr)
-                                           else new_entry + 0.5 * context.atr)
-                context.quantity += (result.lots_executed if isinstance(result, OrderState)
-                                     else sum(i.quantity for i in result.trades))
-                logger.info(f"[{ut.figi_to_name(context.instrument_figi)}] Последний этап"
-                            f" {context.position_units} новая цена {new_entry:.4f}")
-                return True
-            except Exception as e:
-                logger.info(e)
+                logger.error(f'При выставлении ордера произошла ошибка{e}')
                 return False
 
+        # Проверяем условие для увеличения позиции на шорт.
+        elif (context.position_units < context.max_units
+              and price <= last_entry - (Decimal(0.5) * context.history_instrument.atr)
+              and context.short):
+            logger.info(f"{context.history_instrument.instrument_info.name} "
+                        f"переход на этап {context.position_units + 1} - {price:.2f} - short")
+            try:
+                entry: Decimal = last_entry - (Decimal(0.5) * context.history_instrument.atr)
+                result: list[OrderState] = await place_order_with_status_check(connect=connect, context=context,
+                                                                               price=entry, long=False)
+                update_strategy_context(my_context=context, result=result, long=False)
+                return True
+            except Exception as e:
+                logger.error(f'При выставлении ордера произошла ошибка{e}')
+                return False
+
+        # Проверяем условие для закрытия позиции — лонг.
         elif price < context.stop_levels[-1] and context.long:
-            logger.info(f"[{ut.figi_to_name(context.instrument_figi)}]-"
+            logger.info(f"{context.history_instrument.instrument_info.name}-"
                         f"закрытие позиции {context.position_units} - {price:.2f} - long")
-            context.exit_price = price
+            close_price: Decimal = context.stop_levels[-1]
             try:
-                result = await order_for_close_position(context, connect, price)
-                logger.info(result)
-                logger.info(f"[{context.instrument_figi}] позиция закрыта {price:.4f}. Переход в состоянии ожидания.")
-                context.state = IdleState()
-                context.position_units = 0
-                context.entry_prices.clear()
-                context.stop_levels.clear()
-                context.quantity = 0
-                context.long = None
-                context.short = None
-                context.exit_price = None
-                return True
-            except:
-                logger.info(f'Заявка не исполнена')
+                result: list[OrderState] = await order_for_close_position(context, connect, close_price)
+                if not result[-1]:
+                    logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                f'закрыта не полностью')
+                    context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result))
+                    context.no_close = True
+                    return True
+                else:
+                    logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                f'закрыта')
+                    close_context(context)
+                    return True
+            except Exception as e:
+                logger.error(f'При закрытии позиции по {context.history_instrument.instrument_info.name} '
+                             f'произошла ошибка {e}')
                 return False
 
+        # Проверяем условие для закрытия позиции — шорт.
         elif price > context.stop_levels[-1] and context.short:
-            context.state = IdleState()
-            context.exit_price = price
-            logger.info(f"[{context.instrument_figi}] позиция закрыта {price:.4f}. Переход в состоянии ожидания.")
-            return True
-        elif context.position_units > context.max_units and context.long:
-            context.stop_levels[-1] = (context.exit_long_donchian if
-                                       context.exit_long_donchian > context.stop_levels[-1]
-                                       else context.stop_levels[-1])
-            logger.info(f'Смена стоп лосса на 10 дневный канал Дончяна.')
-            return True
-        elif context.position_units > context.max_units and context.short:
-            context.stop_levels[-1] = (context.exit_long_donchian if
-                                       context.exit_long_donchian < context.stop_levels[-1]
-                                       else context.stop_levels[-1])
-            logger.info(f'Смена стоп лосса на 10 дневный канал Дончяна.')
-            return True
-        else:
-            return False
+            logger.info(f"{context.history_instrument.instrument_info.name}-"
+                        f"закрытие позиции {context.position_units} - {price:.2f} - short")
+            close_price: Decimal = context.stop_levels[-1]
+            try:
+                result: list[OrderState] = await order_for_close_position(context, connect, close_price)
+                if not result[-1]:
+                    logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                f'закрыта не полностью')
+                    context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result))
+                    context.no_close = True
+                    return True
+                else:
+                    close_context(context)
+                    return True
+            except Exception as e:
+                logger.error(f'При закрытии позиции по {context.history_instrument.instrument_info.name} '
+                             f'произошла ошибка {e}')
+                return False
 
 
 # Контекст, хранящий состояние стратегии для конкретного инструмента
 class StrategyContext:
-    def __init__(self, history_instrument: HistoricInstrument, portfolio_size: float, n: int):
+    def __init__(self, history_instrument: HistoricInstrument):
         """
         :param history_instrument: Данные по инструменту, который будет торговаться по этой стратегии
-        :param portfolio_size: Размер портфеля (например, в долларах)
-        :param n: Длина канала Дончяна (например, 20)
         """
-        self.instrument_figi = history_instrument.instrument_info.figi
-        self.name = history_instrument.instrument_info.name
-        self.instrument_uid = history_instrument.instrument_info.uid
-        self.ticker = history_instrument.instrument_info.ticker
-        self.name = history_instrument.instrument_info.name
-        self.portfolio_size = portfolio_size
-        self.tick_size = float(history_instrument.tick_size)
-        self.atr = history_instrument.atr
-        self.n = n
-        history_instrument.create_donchian_canal(n, int(n / 2))
-        self.breakout_level_long = history_instrument.max_donchian
-        self.breakout_level_short = history_instrument.min_donchian
-        self.exit_long_donchian = history_instrument.min_short_donchian
-        self.exit_short_donchian = history_instrument.max_short_donchian
+        self.history_instrument: HistoricInstrument = None
+        self.breakout_level_long: Decimal = None
+        self.breakout_level_short: Decimal = None
+        self.exit_long_donchian: Decimal = None
+        self.exit_short_donchian: Decimal = None
+        self.update_data(history_instrument)
 
-        self.long = None
-        self.short = None
-        self.max_units = 4
-        self.position_units = 0
-        self.entry_prices = []
-        self.stop_levels = []
-        self.exit_price = None
-        self.quantity = 0
+        self.start_position_date: datetime.datetime = None
+        self.long: bool = None
+        self.short: bool = None
+        self.max_units: int = 4
+        self.position_units: int = 0
+        self.entry_prices: list[Decimal] = []
+        self.stop_levels: list[Decimal] = []
+        self.quantity: Decimal = Decimal(0)
+        self.portfolio_position: PortfolioPosition = None
+        self.order_state: list[list[OrderState]] = []
+        self.operation_list: list[OperationItem] = []
         self.state: StrategyState = IdleState()
+        self.no_close = None
+
+    def update_data(self, history_instrument: HistoricInstrument):
+        self.history_instrument: HistoricInstrument = history_instrument
+        self.breakout_level_long: Decimal = self.history_instrument.max_donchian
+        self.breakout_level_short: Decimal = self.history_instrument.min_donchian
+        self.exit_long_donchian: Decimal = self.history_instrument.min_short_donchian
+        self.exit_short_donchian: Decimal = self.history_instrument.max_short_donchian
 
     @property
     def direction(self) -> OrderDirection:
@@ -237,61 +246,105 @@ class StrategyContext:
         else:
             return None
 
-    async def on_new_price(self, price: float, connect: ConnectTinkoff):
-        """
-        При получении нового ценового обновления делегируем обработку текущему состоянию.
-        """
+    async def on_new_price(self, price: Decimal, connect: ConnectTinkoff):
         result = await self.state.on_new_price(self, price, connect)
         return result
 
     def current_position_info(self) -> dict[str, Any]:
-        """
-        Возвращает информацию о текущей позиции.
-        """
         return {
-            "name": self.name,
+            "name": self.history_instrument.instrument_info.name,
             "units": self.position_units,
             "entry_prices": self.entry_prices,
             "quantity": self.quantity,
             "stop_levels": self.stop_levels,
             'direction': self.direction.name if self.direction else None,
             "state": self.state.__class__.__name__,
-            "atr": self.atr,
+            "atr": self.history_instrument.atr,
             "breakout_level_long": self.breakout_level_long,
             "breakout_level_short": self.breakout_level_short,
+            "start_position_date": self.start_position_date
         }
 
-    def update_atr(self, history_instrument: HistoricInstrument):
+    async def update_position_info(self, connect: ConnectTinkoff, portfolio: PortfolioPosition = None):
         """
-        Обновляет значение ATR для текущего инструмента.
+        Обновляет информацию о текущей позиции.
         """
-        history_instrument.create_donchian_canal(self.n, int(self.n / 2))
-        self.atr = history_instrument.atr
-        self.breakout_level_long = history_instrument.max_donchian
-        self.breakout_level_short = history_instrument.min_donchian
-        self.exit_long_donchian = history_instrument.min_short_donchian
-        self.exit_short_donchian = history_instrument.max_short_donchian
+        request = GetOperationsByCursorRequest(
+            account_id=ACCOUNT_ID,
+            from_=self.start_position_date if self.start_position_date else now() - timedelta(
+                days=100),
+            to=now(),
+            instrument_id=self.history_instrument.instrument_info.uid,
+            operation_types=[OperationType.OPERATION_TYPE_BUY, OperationType.OPERATION_TYPE_SELL],
+        )
+        operations_response: GetOperationsByCursorResponse = await connect.client.operations.get_operations_by_cursor(
+            request=request
+        )
 
-    async def update_portfolio_size(self, connect: ConnectTinkoff):
-        result: PortfolioResponse = await connect.get_portfolio_by_id(ACCOUNT_ID)
-        self.portfolio_size = float(money_to_decimal(result.total_amount_portfolio))
+        operations_response.items = [item for item in operations_response.items if item.quantity_done > 0]
 
-    async def update_position(self, connect: ConnectTinkoff):
-        await update_position(self, connect)
+        def calculate_stop_level(history_instrument, item, long) -> Decimal:
+            if long:
+                return money_to_decimal(item.price) - (Decimal(0.5) * Decimal(history_instrument.atr))
+            else:
+                return money_to_decimal(item.price) + (Decimal(0.5) * Decimal(history_instrument.atr))
+
+        if portfolio:
+            self.quantity = quotation_to_decimal(portfolio.quantity)
+            self.portfolio_position = portfolio
+        else:
+            self.quantity = 0
+
+        if self.quantity > 0:
+            self.position_units = len([item for item in
+                                       operations_response.items if
+                                       item.type == OperationType.OPERATION_TYPE_BUY and
+                                       item.quantity_done > 0])
+            self.start_position_date = sorted(operations_response.items, key=lambda item_trade: item_trade.date)[0].date
+            self.operation_list = operations_response.items
+            self.long = True
+            self.short = False
+            self.state = TradeOpenState()
+            self.entry_prices = [money_to_decimal(item.price) for item in operations_response.items
+                                 if item.type == OperationType.OPERATION_TYPE_BUY and
+                                 item.quantity_done > 0]
+            self.stop_levels = [calculate_stop_level(self.history_instrument, item, True) for item
+                                in operations_response.items
+                                if item.type == OperationType.OPERATION_TYPE_BUY and
+                                item.quantity_done > 0]
+        elif self.quantity < 0:
+            self.position_units = len([item for item in
+                                       operations_response.items
+                                       if item.type == OperationType.OPERATION_TYPE_SELL and
+                                       item.quantity_done > 0])
+            self.start_position_date = sorted(operations_response.items, key=lambda item_trade: item_trade.date)[0].date
+            self.operation_list = operations_response.items
+            self.long = False
+            self.short = True
+            self.state = TradeOpenState()
+            self.entry_prices = [money_to_decimal(item.price) for item in operations_response.items
+                                 if item.type == OperationType.OPERATION_TYPE_SELL and
+                                 item.quantity_done > 0]
+            self.stop_levels = [calculate_stop_level(self.history_instrument, item, False) for item
+                                in operations_response.items
+                                if item.type == OperationType.OPERATION_TYPE_SELL and
+                                item.quantity_done > 0]
+
+        else:
+            self.start_position_date: datetime.datetime = None
+            self.long: bool = None
+            self.short: bool = None
+            self.max_units: int = 4
+            self.position_units: int = 0
+            self.entry_prices: list[Decimal] = []
+            self.stop_levels: list[Decimal] = []
+            self.quantity: int = 0
+            self.portfolio_position: PortfolioPosition = None
+            self.order_state: list[OrderState] = []
+            self.operation_list: list[OperationItem] = []
+            self.state: StrategyState = IdleState()
+            self.no_close = None
 
 
-# Пример использования:
 if __name__ == '__main__':
-    context = StrategyContext(
-        history_instrument=HistoricInstrument.from_pkl(
-            path=r'C:\Users\aples\PycharmProjects\Gas\IMOEXF Индекс МосБиржи\FUTIMOEXF000'),
-        portfolio_size=100000,
-        n=20
-    )
-
-    dict_strategy_context = {
-        f'{context.instrument_figi}': context
-    }
-
-    with open(r'C:\Users\aples\PycharmProjects\Gas\dict_strategy_state.pkl', 'wb') as f:
-        pickle.dump(dict_strategy_context, f, protocol=pickle.HIGHEST_PROTOCOL)
+    pass

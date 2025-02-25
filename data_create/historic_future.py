@@ -1,6 +1,7 @@
 import datetime
 import json
 import pickle as pkl
+from decimal import Decimal
 
 import pandas as pd
 from tinkoff.invest import Future, HistoricCandle, Quotation, MoneyValue
@@ -10,16 +11,20 @@ from tinkoff.invest.utils import quotation_to_decimal
 
 class HistoricInstrument:
     """
-    Класс для сохранения и загрузки исторических данныхю
+    Класс для сохранения и загрузки исторических данных.
     """
 
     def __init__(self, instrument: Future = None, list_candles: list[HistoricCandle] = None) -> None:
-        """Конструктор класса, вызывается либо с параметрами instriment, list_candles либо загружается из from_csv, path
+        """Конструктор класса, вызывается либо с параметрами instrument, list_candles либо загружается из from_csv, path
         :param list_candles: список исторических свечей
-        :param instrument: объект класса Future - хранение основной информации об инструменте"""
+        :param instrument: объект класса Future - хранение основной информации об инструменте."""
+
+        self.min_short_donchian: Decimal = None
+        self.max_short_donchian: Decimal = None
+        self.max_donchian: Decimal = None
+        self.min_donchian: Decimal = None
 
         df = []
-
         for candle in list_candles:
             row = {
                 'time': candle.time,
@@ -31,12 +36,15 @@ class HistoricInstrument:
             }
             df.append(row)
         self.data: pd.DataFrame = pd.DataFrame(df)
+
         self.instrument_info: Future = instrument
         self.time_last_candle: HistoricCandle = self.data.iloc[-1]['time']
-        self.tick_size = quotation_to_decimal(self.instrument_info.min_price_increment_amount)
+        self.tick_size: Decimal = quotation_to_decimal(self.instrument_info.min_price_increment)
+        self.tick_size_rub: Decimal = quotation_to_decimal(self.instrument_info.min_price_increment_amount)
         self.atr = self.create_atr()
+        self.create_donchian_canal(20, 10)
 
-    def create_atr(self, n=14) -> float:
+    def create_atr(self, n=14) -> Decimal:
         # Добавляем столбец с предыдущим close
         self.data['prev_close'] = self.data['close'].shift(1)
 
@@ -52,7 +60,7 @@ class HistoricInstrument:
         )
 
         # Вычисляем ATR как скользящее среднее по TR за n периодов (можно задать min_periods=1 для первых строк)
-        atr = self.data['tr'].rolling(window=n, min_periods=1).mean().iloc[-1]
+        atr: Decimal = Decimal(self.data['tr'].rolling(window=n, min_periods=1).mean().iloc[-1])
 
         return atr
 

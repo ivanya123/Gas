@@ -1,42 +1,49 @@
 import asyncio
 import datetime
-import json
 import os
 import pickle
+import shelve
 
-from tinkoff.invest import MarketDataResponse
+from tinkoff.invest import FutureResponse, AsyncClient, PositionsResponse, OperationsResponse, OperationType, \
+    GetOperationsByCursorResponse, GetOperationsByCursorRequest
+from tinkoff.invest.utils import now
 
-from bot.telegram_bot import logger
-from config import TOKEN_D
+from config import TOKEN_D, ACCOUNT_ID, TOKEN_TEST
 from data_create.historic_future import HistoricInstrument
 from strategy.docnhian import StrategyContext
 from trad.connect_tinkoff import ConnectTinkoff
-from trad.task_all_time import processing_stream_portfolio
-import utils as ut
-
-
-async def main():
-    connect = ConnectTinkoff(TOKEN_D)
-    await connect.connection()
-    time = datetime.datetime.now()
-    k = await connect.figi_to_name('FUTIMOEXF000')
-    print('1:', datetime.datetime.now() - time, k, sep=' ')
-
-    time = datetime.datetime.now()
-    k = await connect.figi_to_name('FUTIMOEXF000')
-    print('2:', datetime.datetime.now() - time, k, sep=' ')
-
-
-def m():
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, StrategyContext] = pickle.load(f)
-    with open('figi_to_name.json', 'w') as f:
-        dict_name = {v.instrument_figi: v.name for v in dict_strategy_state.values()}
-        json.dump(dict_name, f, indent=4)
-
 
 if __name__ == '__main__':
-    with open('dict_strategy_state.pkl', 'wb') as f:
-        dict_strategy_state = {}
-        pickle.dump(dict_strategy_state, f)
 
+    async def main():
+        connect = ConnectTinkoff(TOKEN_TEST)
+        await connect.connection()
+        with shelve.open('data_strategy_state/dict_strategy_state') as db:
+            for key in db.keys():
+                values: StrategyContext = db[key]
+                candles, instrument_info = await connect.get_candles_from_uid(
+                    uid=values.history_instrument.instrument_info.uid,
+                    interval='1d'
+                )
+                new_history = HistoricInstrument(list_candles=candles, instrument=instrument_info)
+                db[key] = StrategyContext(new_history)
+
+
+    async def main_1():
+        connect = ConnectTinkoff(TOKEN_TEST)
+        await connect.connection()
+        portfolio = await connect.get_portfolio_by_id(ACCOUNT_ID)
+        portfolio_positions = {position.figi: position for position in portfolio.positions}
+        # print('\n'.join(f'{key}: {val}' for key, val in portfolio_positions['FUTNGM052500'].__dict__.items()))
+        with shelve.open('data_strategy_state/dict_strategy_state') as db:
+            for key in db.keys():
+                if key in portfolio_positions:
+                    print(key)
+                    values: StrategyContext = db[key]
+                    print(values.current_position_info())
+                    await values.update_position_info(connect=connect, portfolio=portfolio_positions[key])
+                    print(values.current_position_info())
+                    db[key] = values
+
+
+    asyncio.run(main_1())
