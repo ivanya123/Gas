@@ -64,11 +64,10 @@ class ConnectTinkoff:
         self.client = await self._client.__aenter__()
         self.market_data_stream: AsyncMarketDataStreamManager = self.client.create_market_data_stream()
         self.queue: asyncio.Queue = asyncio.Queue()
-        # TODO: Разкоментировать
-        # self.listen: asyncio.Task = asyncio.create_task(self._listen_stream())
-        # self.task_portfolio_stream: asyncio.Task = asyncio.create_task(self.listening_portfolio_by_id(ACCOUNT_ID))
-        # self.task_operations_stream: asyncio.Task = asyncio.create_task(self.listening_operations_by_id(ACCOUNT_ID))
-        # self.task_orders_stream: asyncio.Task = asyncio.create_task(self.listening_orders(ACCOUNT_ID))
+        self.listen: asyncio.Task = asyncio.create_task(self._listen_stream())
+        self.task_portfolio_stream: asyncio.Task = asyncio.create_task(self.listening_portfolio_by_id(ACCOUNT_ID))
+        self.task_operations_stream: asyncio.Task = asyncio.create_task(self.listening_operations_by_id(ACCOUNT_ID))
+        self.task_orders_stream: asyncio.Task = asyncio.create_task(self.listening_orders(ACCOUNT_ID))
 
     async def _listen_stream(self) -> None:
         """
@@ -84,10 +83,10 @@ class ConnectTinkoff:
                     await self.queue.put(msg)
             except Exception as e:
                 logger.error(f'Ошибка при получении сообщения: {e}')
-                await self.queue.put(e)
                 self.market_data_stream.stop()
                 await asyncio.sleep(5)
                 self.market_data_stream = self.client.create_market_data_stream()
+                logger.info(f'Создание нового стрима после ошибки')
 
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """

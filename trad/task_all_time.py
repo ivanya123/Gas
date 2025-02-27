@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pickle
+import shelve
 from decimal import Decimal
 from typing import Optional
 
@@ -29,15 +30,13 @@ logger = logging.getLogger(__name__)
 async def start_bot(connect: ConnectTinkoff, bot: Bot):
     await connect.connection()
     await bot.send_message(chat_id=CHAT_ID, text='Подключение установлено')
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_subscribe: dict[str, 'StrategyContext'] = pickle.load(f)
-    instruments_id = [value.instrument_uid for value in dict_strategy_subscribe.values()]
-    for value in dict_strategy_subscribe.values():
-        # TODO: изменить функцию обновления портфеля(чтоб загрузка была один раз)
-        await value.update_portfolio_size(connect)
-    with open('dict_strategy_state.pkl', 'wb') as f:
-        pickle.dump(dict_strategy_subscribe, f)
+    with shelve.open('data_strategy_state/dict_strategy_state') as db:
+        db: dict[str, 'StrategyContext']
+        instruments_id = [value.history_instrument.instrument_info.uid for value in db.values()]
+
     await update_data(connect, bot)
+    portfolio = await connect.get_portfolio_by_id(ACCOUNT_ID)
+    global_info_dict['portfolio_size'] = money_to_decimal(portfolio.total_amount_portfolio)
     await connect.add_subscribe_last_price(instruments_id)
     await connect.add_subscribe_status_instrument(instruments_id)
 
@@ -86,16 +85,29 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot) -> None:
 
 
 async def update_strategy_by_price(last_price: LastPrice, connect: ConnectTinkoff, bot: Bot):
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
-    if last_price.figi in dict_strategy_state:
+    strategy_context = get_context_by_figi(last_price.figi)
+    if strategy_context:
         result = await processing_last_price(last_price,
-                                             dict_strategy_state[last_price.figi],
+                                             strategy_context,
                                              connect)
         if result:
-            with open('dict_strategy_state.pkl', 'wb') as f:
-                pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
+            save_context_by_figi(last_price.figi, strategy_context)
             await bot.send_message(chat_id=CHAT_ID, text=result)
+
+
+def save_context_by_figi(figi: str, strategy_context: 'StrategyContext'):
+    with shelve.open('data_strategy_state/dict_strategy_state') as db:
+        db[figi] = strategy_context
+
+
+def get_context_by_figi(figi: str) -> Optional['StrategyContext']:
+    try:
+        with shelve.open('data_strategy_state/dict_strategy_state') as db:
+            strategy_context: 'StrategyContext' = db[figi]
+        return strategy_context
+    except KeyError:
+        logger.error(f'Не удалось найти стратегию по figi: {figi}')
+        return
 
 
 async def processing_last_price(last_price: LastPrice,
@@ -122,8 +134,10 @@ async def processing_stream_portfolio(connect: ConnectTinkoff, bot: Bot):
         response: PortfolioStreamResponse | PositionsStreamResponse = await connect.queue_portfolio.get()
         if isinstance(response, PortfolioStreamResponse):
             text, portfolio_amount = ut.psr_to_string(response)
-            await bot.send_message(chat_id=CHAT_ID, text=text)
-            global_info_dict['portfolio_size'] = portfolio_amount
+            if not response.ping:
+                await bot.send_message(chat_id=CHAT_ID, text=text)
+            if portfolio_amount:
+                global_info_dict['portfolio_size'] = portfolio_amount
         if isinstance(response, PositionsStreamResponse):
             text = ut.position_to_string(response)
             if not response.ping:
@@ -131,18 +145,20 @@ async def processing_stream_portfolio(connect: ConnectTinkoff, bot: Bot):
 
 
 async def update_data(connect: ConnectTinkoff, bot: Bot):
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
-    text = ''
-    for figi, context_strategy in dict_strategy_state.items():
-        historic, info = await connect.get_candles_from_uid(uid=context_strategy.instrument_uid, interval='1d')
-        new_historic = HistoricInstrument(instrument=info, list_candles=historic)
-        new_historic.create_donchian_canal(context_strategy.n, int(context_strategy.n / 2))
-        path = ut.create_folder_and_save_historic_instruments(new_historic)
-        dict_strategy_state[figi].update_data(new_historic)
-        text += f'Данные для <b>{new_historic.instrument_info.name}</b> обновлены и сохранены в {path}\n\n'
-    with open('dict_strategy_state.pkl', 'wb') as f:
-        pickle.dump(dict_strategy_state, f)
+    with shelve.open('data_strategy_state/dict_strategy_state') as db:
+        db: dict[str, 'StrategyContext']
+        text = ''
+        for figi, context_strategy in db.items():
+            historic, info = await connect.get_candles_from_uid(
+                uid=context_strategy.history_instrument.instrument_info.uid,
+                interval='1d'
+            )
+            new_historic = HistoricInstrument(instrument=info, list_candles=historic)
+            path = ut.create_folder_and_save_historic_instruments(new_historic)
+            context_strategy.update_data(new_historic)
+            db[figi] = context_strategy
+            text += f'Данные для <b>{new_historic.instrument_info.name}</b> обновлены и сохранены в {path}\n\n'
+
     if text:
         await bot.send_message(chat_id=CHAT_ID, text=text)
     else:
@@ -200,29 +216,6 @@ async def processing_trades_stream(connect: ConnectTinkoff, bot: Bot):
                 dict_queue[order_trades.figi] = asyncio.Queue()
             dict_queue[order_trades.figi].put_nowait(order_trades)
             await bot.send_message(chat_id=CHAT_ID, text=ut.tsr_to_string(trades_stream_response))
-
-
-def update_all_portfolio_size(portfolio_amount):
-    with open('dict_strategy_state.pkl', 'rb') as f:
-        dict_strategy_state: dict[str, 'StrategyContext'] = pickle.load(f)
-    for figi, context_strategy in dict_strategy_state.items():
-        context_strategy.update_portfolio_size(money_to_decimal(portfolio_amount))
-    with open('dict_strategy_state.pkl', 'wb') as f:
-        pickle.dump(dict_strategy_state, f, pickle.HIGHEST_PROTOCOL)
-
-
-async def waiting_order_accept(context: 'StrategyContext', quantity_result: int, quantity_now: int):
-    while dict_queue.get(context.instrument_figi) is None:
-        logger.debug(f'Ожидаем подтверждения ордера {ut.figi_to_name(context.instrument_figi)}')
-        await asyncio.sleep(5)
-    my_trades = []
-    quantities = quantity_now
-    while quantities != quantity_result:
-        order_trades: OrderTrades = await dict_queue[context.instrument_figi].get()
-        logger.debug(f'Получено подтверждение ордера {ut.figi_to_name(context.instrument_figi)}')
-        quantities += sum([order.quantity for order in order_trades.trades])
-        my_trades.append(order_trades)
-    return my_trades
 
 
 def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal) -> bool:

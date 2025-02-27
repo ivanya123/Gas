@@ -19,6 +19,7 @@ if __name__ == '__main__':
         connect = ConnectTinkoff(TOKEN_TEST)
         await connect.connection()
         with shelve.open('data_strategy_state/dict_strategy_state') as db:
+            db: dict[str, StrategyContext]
             for key in db.keys():
                 values: StrategyContext = db[key]
                 candles, instrument_info = await connect.get_candles_from_uid(
@@ -27,6 +28,7 @@ if __name__ == '__main__':
                 )
                 new_history = HistoricInstrument(list_candles=candles, instrument=instrument_info)
                 db[key] = StrategyContext(new_history)
+                print(f"{'\n'.join(f'{k}: {v}' for k, v in db[key].current_position_info().items())}")
 
 
     async def main_1():
@@ -34,16 +36,6 @@ if __name__ == '__main__':
         await connect.connection()
         portfolio = await connect.get_portfolio_by_id(ACCOUNT_ID)
         portfolio_positions = {position.figi: position for position in portfolio.positions}
-        # print('\n'.join(f'{key}: {val}' for key, val in portfolio_positions['FUTNGM052500'].__dict__.items()))
-        with shelve.open('data_strategy_state/dict_strategy_state') as db:
-            for key in db.keys():
-                if key in portfolio_positions:
-                    print(key)
-                    values: StrategyContext = db[key]
-                    print(values.current_position_info())
-                    await values.update_position_info(connect=connect, portfolio=portfolio_positions[key])
-                    print(values.current_position_info())
-                    db[key] = values
 
 
-    asyncio.run(main_1())
+    asyncio.run(main())

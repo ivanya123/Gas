@@ -41,15 +41,15 @@
     "first_1day_candle_date": "2024-12-04T00:00:00+00:00",
     "initial_margin_on_buy": {
         "currency": "rub",
-        "units": 973,
-        "nano": 210000000
+        "units": 882,
+        "nano": 580000000
     },
     "initial_margin_on_sell": {
         "currency": "rub",
-        "units": 978,
-        "nano": 500000000
+        "units": 884,
+        "nano": 990000000
     },
-    "min_price_increment_amount": 0.8851,
+    "min_price_increment_amount": 0.86632,
     "brand": {
         "logo_name": "OilFut.png",
         "logo_base_color": "#000000",

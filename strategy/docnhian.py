@@ -262,7 +262,9 @@ class StrategyContext:
             "atr": self.history_instrument.atr,
             "breakout_level_long": self.breakout_level_long,
             "breakout_level_short": self.breakout_level_short,
-            "start_position_date": self.start_position_date
+            "start_position_date": (self.start_position_date.strftime("%Y-%m-%d %H:%M:%S")
+                                    if self.start_position_date else None),
+            "no_close": self.no_close
         }
 
     async def update_position_info(self, connect: ConnectTinkoff, portfolio: PortfolioPosition = None):
@@ -299,7 +301,7 @@ class StrategyContext:
             self.position_units = len([item for item in
                                        operations_response.items if
                                        item.type == OperationType.OPERATION_TYPE_BUY and
-                                       item.quantity_done > 0])
+                                       item.quantity_done == item.quantity])
             self.start_position_date = sorted(operations_response.items, key=lambda item_trade: item_trade.date)[0].date
             self.operation_list = operations_response.items
             self.long = True

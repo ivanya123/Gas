@@ -41,13 +41,13 @@
     "first_1day_candle_date": "2023-11-14T07:00:00+00:00",
     "initial_margin_on_buy": {
         "currency": "rub",
-        "units": 3312,
-        "nano": 100000000
+        "units": 3274,
+        "nano": 760000000
     },
     "initial_margin_on_sell": {
         "currency": "rub",
-        "units": 3316,
-        "nano": 450000000
+        "units": 3276,
+        "nano": 550000000
     },
     "min_price_increment_amount": 5.0,
     "brand": {

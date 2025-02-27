@@ -93,10 +93,10 @@ class HistoricInstrument:
         self.data[f'min_{short_d}_donchian'] = self.data['low'].rolling(short_d).min()
 
         length_df = len(self.data)
-        self.max_donchian = self.data.loc[length_df - 1, f'max_{long_d}_donchian']
-        self.min_donchian = self.data.loc[length_df - 1, f'min_{long_d}_donchian']
-        self.max_short_donchian = self.data.loc[length_df - 1, f'max_{short_d}_donchian']
-        self.min_short_donchian = self.data.loc[length_df - 1, f'min_{short_d}_donchian']
+        self.max_donchian = Decimal(self.data.loc[length_df - 1, f'max_{long_d}_donchian'])
+        self.min_donchian = Decimal(self.data.loc[length_df - 1, f'min_{long_d}_donchian'])
+        self.max_short_donchian = Decimal(self.data.loc[length_df - 1, f'max_{short_d}_donchian'])
+        self.min_short_donchian = Decimal(self.data.loc[length_df - 1, f'min_{short_d}_donchian'])
 
     def __call__(self):
         return self.data, self.instrument_info

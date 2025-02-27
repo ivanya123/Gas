@@ -158,6 +158,7 @@ def get_all_path_subs(dict_instruments: dict[str, list[str]]) -> tuple[list[str]
 
 def psr_to_string(psr: PortfolioStreamResponse) -> str:
     string = ''
+    portfolio_size = None
     if portfolio := psr.portfolio:
         for position in portfolio.positions:
             string += (f'{figi_to_name(position.figi)}-{position.instrument_type}\n'
@@ -168,6 +169,7 @@ def psr_to_string(psr: PortfolioStreamResponse) -> str:
         string += (f'\nОбщая информация по портфелю\n'
                    f'Доходность: {portfolio.expected_yield}%\n'
                    f'Стоимость портфеля: {money_to_decimal(portfolio.total_amount_portfolio)}')
+        portfolio_size = money_to_decimal(portfolio.total_amount_portfolio)
 
     if psr.ping:
         dt_moscow = psr.ping.time.astimezone(ZoneInfo("Europe/Moscow"))
@@ -177,7 +179,7 @@ def psr_to_string(psr: PortfolioStreamResponse) -> str:
     if psr.subscriptions:
         string += 'Оформлена подписка на стрим портфолио'
 
-    return string, money_to_decimal(portfolio.total_amount_portfolio)
+    return string, portfolio_size
 
 
 def position_to_string(position: PositionsStreamResponse) -> str:
