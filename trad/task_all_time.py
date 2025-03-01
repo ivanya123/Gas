@@ -6,10 +6,11 @@ import pickle
 import shelve
 from decimal import Decimal
 from typing import Optional
+from typing import TYPE_CHECKING
 
 from aiogram import Bot
 from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, PositionsStreamResponse, TradesStreamResponse, \
-    OrderTrades, OrderState, OrderDirection, OrderType, OrderExecutionReportStatus, GetFuturesMarginResponse, \
+    OrderState, OrderDirection, OrderType, OrderExecutionReportStatus, GetFuturesMarginResponse, \
     PostOrderResponse, LastPrice, Quotation, PriceType
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal, decimal_to_quotation
 
@@ -17,7 +18,6 @@ import utils as ut
 from config import CHAT_ID, ACCOUNT_ID, TOKEN_D
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from strategy.docnhian import StrategyContext
@@ -33,9 +33,12 @@ async def start_bot(connect: ConnectTinkoff, bot: Bot):
     with shelve.open('data_strategy_state/dict_strategy_state') as db:
         db: dict[str, 'StrategyContext']
         instruments_id = [value.history_instrument.instrument_info.uid for value in db.values()]
+        figis = [value.history_instrument.instrument_info.figi for value in db.values()]
 
     await update_data(connect, bot)
     portfolio = await connect.get_portfolio_by_id(ACCOUNT_ID)
+    list_corutin = [connect.figi_to_name(figi) for figi in figis]
+    await asyncio.gather(*list_corutin)
     global_info_dict['portfolio_size'] = money_to_decimal(portfolio.total_amount_portfolio)
     await connect.add_subscribe_last_price(instruments_id)
     await connect.add_subscribe_status_instrument(instruments_id)

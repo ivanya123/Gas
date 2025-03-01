@@ -198,9 +198,13 @@ class ConnectTinkoff:
         :param last_price: bool - Удаляем цену на последние цены сделок.
         :return:
         """
-        logger.info(f'Удаляем подписку на свечи {instrument_id}')
+        logger.info(f'Удаляем подписку на {instrument_id}')
         if not self.market_data_stream:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
+
+        instrument_info = InfoInstrument(instrument_id=instrument_id)
+        self.market_data_stream.info.unsubscribe(instruments=instrument_info)
+        logger.info(f'Подписка на стрим статуса инструмента отменена {instrument_id}')
 
         if not last_price:
             instrument = CandleInstrument(
@@ -211,6 +215,7 @@ class ConnectTinkoff:
         else:
             instrument = LastPriceInstrument(instrument_id=instrument_id)
             self.market_data_stream.last_price.unsubscribe(instruments=[instrument])
+            logger.info(f'Подписка на стрим сделок отменена {instrument_id}')
 
     async def info_accounts(self) -> list[PortfolioResponse]:
         """

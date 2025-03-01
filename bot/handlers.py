@@ -1,12 +1,11 @@
 import asyncio
-import pickle
 import shelve
+from decimal import Decimal
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
-from tinkoff.invest import GetMarginAttributesResponse, PortfolioResponse
-from tinkoff.invest.utils import money_to_decimal
+from tinkoff.invest import GetMarginAttributesResponse
 
 import bot.keyboard as kb
 import utils as ut
@@ -81,21 +80,15 @@ async def portfolio():
     await conclusion_in_day(connect, bot)
 
 
-@start_router.callback_query(F.data)
+@start_router.callback_query('-' not in F.data)
 async def callback(call_back: CallbackQuery):
     context: StrategyContext = get_context_by_figi(call_back.data)
     dict_info = context.current_position_info()
-    text = '\n'.join(f'{key}: {value}' for key, value in dict_info.items())
+    text = '\n'.join(
+        f'{key}: {value:.2f}' if isinstance(value, (int, float, Decimal)) else f'{key}: {value}' for key, value in
+        dict_info.items()
+    )
     await bot.send_message(chat_id=call_back.message.chat.id, text=text)
-
-
-@start_router.message(Command('tasks'))
-async def tasks(message: Message):
-    list_task: list[asyncio.Task] = asyncio.all_tasks()
-    text = ''
-    for task in list_task:
-        text += f'{task.get_name()}\n'
-    await bot.send_message(chat_id=message.chat.id, text=text, parse_mode=None)
 
 
 @start_router.message(F.text == 'margin')
@@ -131,7 +124,22 @@ async def update_position(message: Message):
         await bot.send_message(chat_id=message.chat.id, text=f'Ошибка при обновлении позиций: {e}')
 
 
+@start_router.message(Command('unsubscribe'))
+async def unsubscribe(message: Message):
+    await bot.send_message(chat_id=message.chat.id,
+                           text='Выберите инструмент для отписки',
+                           reply_markup=kb.kb_unsubscribe())
 
 
-
-
+@start_router.callback_query('unsubscribe' in F.data)
+async def unsubscribe_data(call_back: CallbackQuery):
+    key = call_back.data.split('-')[0]
+    with shelve.open('data_strategy_state/dict_strategy_state') as db:
+        context: 'StrategyContext' = db[key]
+        if context.quantity > 0:
+            await bot.send_message(chat_id=call_back.message.chat.id, text=(f'Нельзя отписаться от позиции\n'
+                                                                            f'{context.quantity} лотов держится'))
+        else:
+            del db[key]
+            await connect.delete_subscribe(context.history_instrument.instrument_info.uid, last_price=True)
+            await bot.send_message(chat_id=call_back.message.chat.id, text='Отписка от позиции успешно отменена')

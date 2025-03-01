@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import abc
-import asyncio
 import datetime
-import pickle
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from tinkoff.invest import OrderState, OrderDirection, PortfolioResponse, GetOperationsByCursorRequest, OperationType, \
-    GetOperationsByCursorResponse, AsyncClient, PortfolioPosition, OperationItem, OperationState
+from tinkoff.invest import OrderState, OrderDirection, GetOperationsByCursorRequest, OperationType, \
+    GetOperationsByCursorResponse, PortfolioPosition, OperationItem
 from tinkoff.invest.utils import money_to_decimal, now, quotation_to_decimal
 
-import utils as ut
 from bot.telegram_bot import logger
-from config import ACCOUNT_ID, TOKEN_D, TOKEN_TEST
+from config import ACCOUNT_ID
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
 from trad.task_all_time import place_order_with_status_check, order_for_close_position
@@ -227,6 +224,11 @@ class StrategyContext:
         self.breakout_level_short: Decimal = self.history_instrument.min_donchian
         self.exit_long_donchian: Decimal = self.history_instrument.min_short_donchian
         self.exit_short_donchian: Decimal = self.history_instrument.max_short_donchian
+        # Замена стоп лосса торговой стратегии при позиции в 4 юнита.
+        if self.max_units >= 4 and self.long and self.stop_levels[-1] < self.exit_long_donchian:
+            self.stop_levels.append(self.exit_long_donchian)
+        elif self.max_units >= 4 and self.short and self.stop_levels[-1] > self.exit_short_donchian:
+            self.stop_levels.append(self.exit_short_donchian)
 
     @property
     def direction(self) -> OrderDirection:
