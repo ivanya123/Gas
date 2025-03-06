@@ -21,6 +21,8 @@ if __name__ == '__main__':
         context = db['FUTNGM032500']
         print(context.entry_prices)
         print(context.stop_levels)
+        print(context.quantity)
+
 
 
 
