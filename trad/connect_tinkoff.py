@@ -117,7 +117,7 @@ class ConnectTinkoff:
             interval = '1m'
         async for candle in self.client.get_all_candles(
                 instrument_id=instrument.instrument.uid,
-                to=now + datetime.timedelta(days=1),
+                to=now - datetime.timedelta(days=1),
                 from_=now - datetime.timedelta(days=365),
                 interval=string_to_interval(interval)
         ):

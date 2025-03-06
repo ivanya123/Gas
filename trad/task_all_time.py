@@ -258,6 +258,7 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
     price_rub_point, price_in_rub, min_price_increment = await get_rub_price(connect, context, price)
     # Гарантирует что, цена будет кратна минимальному шагу.
     price = (price // min_price_increment) * min_price_increment
+    logger.info(f'Цена в пунктах: {price}')
     logger.info(f'Цена в рублях: {price_in_rub}')
     order_params = {
         'instrument_id': context.history_instrument.instrument_info.uid,
@@ -494,7 +495,7 @@ async def replace_order(connect, context, order_response_id, order_state, price,
 
 async def get_rub_price(connect, context, price) -> tuple[Decimal, Decimal, Decimal]:
     margin_response: GetFuturesMarginResponse = await connect.client.instruments.get_futures_margin(
-        instrument_id=context.instrument_uid
+        instrument_id=context.history_instrument.instrument_info.uid
     )
     min_price_increment = margin_response.min_price_increment
     min_price_increment_amount = margin_response.min_price_increment_amount

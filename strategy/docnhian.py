@@ -20,19 +20,25 @@ from trad.task_all_time import place_order_with_status_check, order_for_close_po
 def update_strategy_context(my_context: 'StrategyContext',
                             result: list[OrderState],
                             long: bool):
-    entry_price = Decimal(sum(money_to_decimal(x.initial_security_price) for x in result) / len(result))
+    entry_price = Decimal(sum(money_to_decimal(x.average_position_price) for x in result) / len(result))
+    min_increment_amount = quotation_to_decimal(
+        my_context.history_instrument.instrument_info.min_price_increment_amount)
+    min_increment = quotation_to_decimal(my_context.history_instrument.instrument_info.min_price_increment)
+    entry_price = ((entry_price / min_increment_amount) * min_increment).quantize(Decimal('1.00'),
+                                                                                  rounding='ROUND_HALF_EVEN')
     my_context.position_units += 1
     my_context.state = TradeOpenState()
     if long:
         my_context.long = True
         my_context.short = False
-        my_context.stop_levels.append(entry_price - Decimal(0.5) * my_context.history_instrument.atr)
+        my_context.stop_levels.append(entry_price - (Decimal(0.5) * my_context.history_instrument.atr))
     else:
         my_context.long = False
         my_context.short = True
-        my_context.stop_levels.append(entry_price + Decimal(0.5) * my_context.history_instrument.atr)
-    my_context.quantity = Decimal(sum(x.lots_executed for x in result))
+        my_context.stop_levels.append(entry_price + (Decimal(0.5) * my_context.history_instrument.atr))
+    my_context.quantity += Decimal(sum(x.lots_executed for x in result))
     my_context.order_state.append(result)
+    my_context.entry_prices.append(entry_price)
     if my_context.position_units == 1:
         logger.info(
             f"[{my_context.history_instrument.instrument_info.name} открыта позиция "

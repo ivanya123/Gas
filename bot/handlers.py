@@ -80,7 +80,7 @@ async def portfolio():
     await conclusion_in_day(connect, bot)
 
 
-@start_router.callback_query('-' not in F.data)
+@start_router.callback_query(F.data)
 async def callback(call_back: CallbackQuery):
     context: StrategyContext = get_context_by_figi(call_back.data)
     dict_info = context.current_position_info()
@@ -131,7 +131,7 @@ async def unsubscribe(message: Message):
                            reply_markup=kb.kb_unsubscribe())
 
 
-@start_router.callback_query('unsubscribe' in F.data)
+@start_router.callback_query(F.data)
 async def unsubscribe_data(call_back: CallbackQuery):
     key = call_back.data.split('-')[0]
     with shelve.open('data_strategy_state/dict_strategy_state') as db:
