@@ -227,6 +227,8 @@ def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal, c
     last_price = money_to_decimal(order_state.initial_order_price)
     last_price = ((last_price / min_increment_amount) * min_increment).quantize(Decimal('1.00'),
                                                                                 rounding='ROUND_HALF_EVEN')
+    logger.info(f'Цена последней выполненной сделки: {new_price}')
+    logger.info(f'Цена по которой будет изменена заявка: {last_price + (atr / Decimal(2)):.2f}')
     direction = order_state.direction
     new_price = quotation_to_decimal(new_price)
     if direction == OrderDirection.ORDER_DIRECTION_BUY:
@@ -482,7 +484,7 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
             raise Exception(f'При отмене заявки произошла ошибка {e}')
 
 
-async def replace_order(connect, context, order_response_id, order_state, price, min_price_increment):
+async def replace_order(connect: 'ConnectTinkoff', context, order_response_id, order_state, price, min_price_increment):
     logger.info(f'Цена изменилась, меняем цену ордера на величину {context.history_instrument.atr}')
     new_price = (price + (context.history_instrument.atr / Decimal(2)) if
                  order_state.direction == OrderDirection.ORDER_DIRECTION_BUY
