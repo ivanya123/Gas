@@ -225,9 +225,10 @@ def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal, c
     min_increment_amount = quotation_to_decimal(
         context.history_instrument.instrument_info.min_price_increment_amount)
     min_increment = quotation_to_decimal(context.history_instrument.instrument_info.min_price_increment)
-    last_price = money_to_decimal(order_state.initial_order_price)
+    last_price = money_to_decimal(order_state.initial_security_price)
     last_price = ((last_price / min_increment_amount) * min_increment).quantize(Decimal('1.00'),
                                                                                 rounding='ROUND_HALF_EVEN')
+    logger.info(f'Цена по которой был выставлен ордер: {last_price:.2f}')
     logger.info(f'Цена последней выполненной сделки: {new_price}')
     logger.info(f'Цена по которой будет изменена заявка: {last_price + (atr / Decimal(2)):.2f}')
     direction = order_state.direction
