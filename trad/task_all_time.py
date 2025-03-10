@@ -44,7 +44,7 @@ async def start_bot(connect: ConnectTinkoff, bot: Bot):
 
 
 update_tasks: dict[str, asyncio.Task] = {}
-dict_last_price: dict[str, asyncio.Queue] = {}
+dict_last_price: dict[str, Quotation] = {}
 
 
 async def processing_stream(connect: ConnectTinkoff, bot: Bot) -> None:
@@ -67,6 +67,7 @@ async def processing_stream(connect: ConnectTinkoff, bot: Bot) -> None:
                         # Кладем последний цену в словарь обновления,
                         # для возможности управления выставлением ордера в зависимости от новой цены инструмента.
                         dict_last_price[instrument_figi] = last_price.price
+                        logger.debug(f'{dict_last_price} словарь обновлен')
                     else:  # если задача еще не запущена
                         # Запускаем задачу обновления
                         task = asyncio.create_task(update_strategy_by_price(last_price, connect, bot))
@@ -300,6 +301,7 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
                 return list_order_state
             # Обработка нового ордера, без выполненных лотов
             elif order_state.execution_report_status == OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_NEW:
+                print(dict_last_price)
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
