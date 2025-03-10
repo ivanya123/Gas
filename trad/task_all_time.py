@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from aiogram import Bot
 from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, PositionsStreamResponse, TradesStreamResponse, \
     OrderState, OrderDirection, OrderType, OrderExecutionReportStatus, GetFuturesMarginResponse, \
-    PostOrderResponse, LastPrice, Quotation, PriceType
+    PostOrderResponse, LastPrice, Quotation, PriceType, ReplaceOrderRequest
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal, decimal_to_quotation
 
 import utils as ut
@@ -290,9 +290,9 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
     await asyncio.sleep(10)
     list_order_state = []
     order_state = None
-    for _ in range(count):
+    for i in range(count):
         try:
-            logger.info(f'Ждем подтверждения ордера {count} раз с интервалом {retry_interval} сек.')
+            logger.info(f'Ждем подтверждения ордера {count}({i}) раз с интервалом {retry_interval} сек.')
             order_state: OrderState = await connect.client.orders.get_order_state(order_id=order_response_id,
                                                                                   account_id=ACCOUNT_ID)
             # Обработка успешно выполненного ордера
@@ -502,7 +502,9 @@ async def replace_order(connect: 'ConnectTinkoff', context, order_response_id, o
         'idempotency_key': new_order_id,
         'price_type': PriceType.PRICE_TYPE_POINT
     }
-    new_order = await connect.client.orders.replace_order(**order_params)
+    request = ReplaceOrderRequest(**order_params)
+    new_order = await connect.client.orders.replace_order(request)
+    logger.info(f'Цена заявки изменена на {new_price} {new_order.execution_report_status}')
     return new_order
 
 
