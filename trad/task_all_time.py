@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import pickle
 import shelve
 from decimal import Decimal
 from typing import Optional
@@ -15,7 +14,7 @@ from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, Position
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal, decimal_to_quotation
 
 import utils as ut
-from config import CHAT_ID, ACCOUNT_ID, TOKEN_D
+from config import CHAT_ID, ACCOUNT_ID
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
 
@@ -221,8 +220,8 @@ async def processing_trades_stream(connect: ConnectTinkoff, bot: Bot):
             await bot.send_message(chat_id=CHAT_ID, text=ut.tsr_to_string(trades_stream_response))
 
 
-def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal) -> bool:
-    last_price = money_to_decimal(order_state.initial_order_price)
+def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal, init_price: Decimal) -> bool:
+    last_price = init_price
     direction = order_state.direction
     new_price = quotation_to_decimal(new_price)
     if direction == OrderDirection.ORDER_DIRECTION_BUY:
@@ -297,6 +296,7 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
+                                     init_price=price,
                                      atr=context.history_instrument.atr):
                         new_order = await replace_order(connect, context,
                                                         order_response_id, order_state,
@@ -312,6 +312,7 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
                   OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL):
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
+                                     init_price=price,
                                      order_state=order_state,
                                      atr=context.history_instrument.atr):
                         new_order = await replace_order(connect, context,
@@ -419,6 +420,7 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
+                                     init_price=price,
                                      atr=context.history_instrument.atr):
                         new_order = await replace_order(connect=connect, context=context,
                                                         order_response_id=order_response_id,
@@ -437,6 +439,7 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
+                                     init_price=price,
                                      atr=context.history_instrument.atr):
                         new_order = await replace_order(connect=connect, context=context,
                                                         order_response_id=order_response_id,
@@ -512,27 +515,4 @@ async def get_rub_price(connect, context, price) -> tuple[Decimal, Decimal, Deci
 
 
 if __name__ == '__main__':
-    async def main():
-        connect = ConnectTinkoff(TOKEN_D)
-        await connect.connection()
-        with open('dict_strategy_state.pkl', 'rb') as f:
-            dict_strategy_subscribe: dict[str, 'StrategyContext'] = pickle.load(f)
-        instruments_id = [value.instrument_uid for value in dict_strategy_subscribe.values()]
-        await connect.add_subscribe_last_price(instruments_id)
-        list_msg = []
-        task_l = asyncio.create_task(listen(connect, list_msg))
-        await asyncio.sleep(120)
-        task_l.cancel()
-        logger.info('Список сообщений %list_msg', list_msg)
-        with open(r'tests\list_msg.pkl', 'wb') as f:
-            pickle.dump(list_msg, f)
-
-
-    async def listen(connect, list_msg):
-        while True:
-            msg: MarketDataResponse = await connect.queue.get()
-            list_msg.append(msg)
-            logger.info('Положен в список %msg', ut.market_data_response_to_string(msg))
-
-
-    asyncio.run(main())
+    pass
