@@ -220,8 +220,13 @@ async def processing_trades_stream(connect: ConnectTinkoff, bot: Bot):
             await bot.send_message(chat_id=CHAT_ID, text=ut.tsr_to_string(trades_stream_response))
 
 
-def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal, init_price: Decimal) -> bool:
-    last_price = init_price
+def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal, context: 'StrategyContext') -> bool:
+    min_increment_amount = quotation_to_decimal(
+        context.history_instrument.instrument_info.min_price_increment_amount)
+    min_increment = quotation_to_decimal(context.history_instrument.instrument_info.min_price_increment)
+    last_price = money_to_decimal(order_state.initial_order_price)
+    last_price = ((last_price / min_increment_amount) * min_increment).quantize(Decimal('1.00'),
+                                                                                rounding='ROUND_HALF_EVEN')
     direction = order_state.direction
     new_price = quotation_to_decimal(new_price)
     if direction == OrderDirection.ORDER_DIRECTION_BUY:
@@ -296,8 +301,8 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
-                                     init_price=price,
-                                     atr=context.history_instrument.atr):
+                                     atr=context.history_instrument.atr,
+                                     context=context):
                         new_order = await replace_order(connect, context,
                                                         order_response_id, order_state,
                                                         price, min_price_increment)
@@ -312,9 +317,9 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
                   OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL):
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
-                                     init_price=price,
                                      order_state=order_state,
-                                     atr=context.history_instrument.atr):
+                                     atr=context.history_instrument.atr,
+                                     context=context):
                         new_order = await replace_order(connect, context,
                                                         order_response_id, order_state,
                                                         price, min_price_increment)
@@ -420,8 +425,8 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
-                                     init_price=price,
-                                     atr=context.history_instrument.atr):
+                                     atr=context.history_instrument.atr,
+                                     context=context):
                         new_order = await replace_order(connect=connect, context=context,
                                                         order_response_id=order_response_id,
                                                         order_state=order_state, price=price,
@@ -439,8 +444,8 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
                 if context.history_instrument.instrument_info.figi in dict_last_price:
                     if compare_price(new_price=dict_last_price[context.history_instrument.instrument_info.figi],
                                      order_state=order_state,
-                                     init_price=price,
-                                     atr=context.history_instrument.atr):
+                                     atr=context.history_instrument.atr,
+                                     context=context):
                         new_order = await replace_order(connect=connect, context=context,
                                                         order_response_id=order_response_id,
                                                         order_state=order_state, price=price,
