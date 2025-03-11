@@ -385,7 +385,9 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
     logger.info(f'Закрытие позиции {context.history_instrument.instrument_info.name} по цене {price}')
     order_id = ut.generate_order_id()
     min_price_increment = quotation_to_decimal(context.history_instrument.instrument_info.min_price_increment)
+    logger.info(f"Тип цены {price} - {type(price)}")
     price = (price // min_price_increment) * min_price_increment
+    logger.info(f"Тип цены {price} - {type(price)}")
     order_params = {
         'instrument_id': context.history_instrument.instrument_info.uid,
         'quantity': context.quantity,
