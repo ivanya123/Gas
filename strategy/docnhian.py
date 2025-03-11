@@ -162,7 +162,10 @@ class TradeOpenState(StrategyState):
                 if not result[-1]:
                     logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
                                 f'закрыта не полностью')
-                    context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result))
+                    try:
+                        context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result[:-1]))
+                    except IndexError:
+                        context.quantity = Decimal(0)
                     context.no_close = True
                     return True
                 else:
@@ -185,7 +188,10 @@ class TradeOpenState(StrategyState):
                 if not result[-1]:
                     logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
                                 f'закрыта не полностью')
-                    context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result))
+                    try:
+                        context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result[:-1]))
+                    except IndexError:
+                        context.quantity = Decimal(0)
                     context.no_close = True
                     return True
                 else:

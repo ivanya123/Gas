@@ -230,7 +230,8 @@ def compare_price(new_price: Quotation, order_state: OrderState, atr: Decimal, c
                                                                                 rounding='ROUND_HALF_EVEN')
     logger.info(f'Цена по которой был выставлен ордер: {last_price:.2f}')
     logger.info(f'Цена последней выполненной сделки: {new_price}')
-    logger.info(f'Цена по которой будет изменена заявка: {last_price + (atr / Decimal(2)):.2f}')
+    logger.info(f'Цена по которой будет изменена заявка: {last_price + (atr / Decimal(2)):.2f}'
+                f' или {last_price - (atr / Decimal(2)):.2f}')
     direction = order_state.direction
     new_price = quotation_to_decimal(new_price)
     if direction == OrderDirection.ORDER_DIRECTION_BUY:
