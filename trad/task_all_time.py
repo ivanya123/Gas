@@ -389,7 +389,7 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
     order_params = {
         'instrument_id': context.history_instrument.instrument_info.uid,
         'quantity': context.quantity,
-        'price': price,
+        'price': decimal_to_quotation(price),
         'direction': context.close_direction,
         'account_id': ACCOUNT_ID,
         'order_type': OrderType.ORDER_TYPE_LIMIT,
