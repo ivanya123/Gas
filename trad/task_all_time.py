@@ -390,7 +390,7 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
     logger.info(f"Тип цены {price} - {type(price)}")
     order_params = {
         'instrument_id': context.history_instrument.instrument_info.uid,
-        'quantity': context.quantity,
+        'quantity': int(context.quantity),
         'price': decimal_to_quotation(price),
         'direction': context.close_direction,
         'account_id': ACCOUNT_ID,
