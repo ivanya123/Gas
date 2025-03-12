@@ -72,7 +72,8 @@ async def subscribe(message: Message):
 async def start(message: Message):
     text = (f"<b>Доступные команды:</b>\n"
             f"/portfolio - информация по портфолио\n"
-            f"/margin - информация по заблокированной сумме\n\n"
+            f"/margin - информация по заблокированной сумме"
+            f"/state_info - информация по состоянию стратегии по инструменту\n\n"
             f"<b>Для оформления подписки на инструмент нужно написать в чате:</b>\n"
             f"Bot_subscribe <b>ИМЯ1 ИМЯ2 ИМЯ3</b>\n"
             f"<b>ИМЯ</b> - ticker инструмента\n"
@@ -90,7 +91,7 @@ async def portfolio():
     await conclusion_in_day(connect, bot)
 
 
-@start_router.message(Command('/state_info'))
+@start_router.message(Command('state_info'))
 async def state_info(message: Message):
     await bot.send_message(chat_id=message.chat.id,
                            text=f'Выберите инструмент по которому хотите получить информацию',

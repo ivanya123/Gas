@@ -205,7 +205,7 @@ class ConnectTinkoff:
             raise Exception("Не создан стриминг. Вызовите connect() сначала.")
 
         instrument_info = InfoInstrument(instrument_id=instrument_id)
-        self.market_data_stream.info.unsubscribe(instruments=instrument_info)
+        self.market_data_stream.info.unsubscribe(instruments=[instrument_info])
         logger.info(f'Подписка на стрим статуса инструмента отменена {instrument_id}')
 
         if not last_price:
