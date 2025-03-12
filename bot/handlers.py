@@ -116,7 +116,7 @@ async def margin(message: Message):
     await bot.send_message(chat_id=message.chat.id, text=test, parse_mode=None)
 
 
-@start_router.message(F.text == 'Bot_update_position')
+@start_router.message(Command('update_position'))
 async def update_position(message: Message):
     try:
         dict_state: dict[str, StrategyContext] = {}
