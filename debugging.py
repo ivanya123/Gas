@@ -16,12 +16,14 @@ from trad.connect_tinkoff import ConnectTinkoff
 
 if __name__ == '__main__':
 
-    with shelve.open('data_strategy_state/dict_strategy_state') as db:
-        db: dict[str, 'StrategyContext']
-        context = db['FUTNGM032500']
-        print(context.entry_prices)
-        print(context.stop_levels)
-        print(context.quantity)
+    # with shelve.open('data_strategy_state/dict_strategy_state') as db:
+    #     db: dict[str, 'StrategyContext']
+    #     context = db['FUTNGM032500']
+    #     print(context.entry_prices)
+    #     print(context.stop_levels)
+    #     print(context.quantity)
+    a = int(Decimal(12.0))
+    print(a)
 
 
 

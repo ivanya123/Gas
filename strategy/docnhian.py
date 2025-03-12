@@ -36,7 +36,7 @@ def update_strategy_context(my_context: 'StrategyContext',
         my_context.long = False
         my_context.short = True
         my_context.stop_levels.append(entry_price + (Decimal(0.5) * my_context.history_instrument.atr))
-    my_context.quantity += Decimal(sum(x.lots_executed for x in result))
+    my_context.quantity += int(sum(x.lots_executed for x in result))
     my_context.order_state.append(result)
     my_context.entry_prices.append(entry_price)
     if my_context.position_units == 1:
@@ -106,7 +106,7 @@ def close_context(context: 'StrategyContext') -> None:
     context.position_units = 0
     context.entry_prices = []
     context.stop_levels = []
-    context.quantity = Decimal(0)
+    context.quantity = 0
     context.portfolio_position = None
     context.order_state = []
     context.operation_list = []
@@ -163,9 +163,9 @@ class TradeOpenState(StrategyState):
                     logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
                                 f'закрыта не полностью')
                     try:
-                        context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result[:-1]))
+                        context.quantity = context.quantity - int(sum(x.lots_executed for x in result[:-1]))
                     except IndexError:
-                        context.quantity = Decimal(0)
+                        context.quantity = 0
                     context.no_close = True
                     return True
                 else:
@@ -189,9 +189,9 @@ class TradeOpenState(StrategyState):
                     logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
                                 f'закрыта не полностью')
                     try:
-                        context.quantity = context.quantity - Decimal(sum(x.lots_executed for x in result[:-1]))
+                        context.quantity = context.quantity - int(sum(x.lots_executed for x in result[:-1]))
                     except IndexError:
-                        context.quantity = Decimal(0)
+                        context.quantity = 0
                     context.no_close = True
                     return True
                 else:
@@ -223,7 +223,7 @@ class StrategyContext:
         self.position_units: int = 0
         self.entry_prices: list[Decimal] = []
         self.stop_levels: list[Decimal] = []
-        self.quantity: Decimal = Decimal(0)
+        self.quantity: Decimal = 0
         self.portfolio_position: PortfolioPosition = None
         self.order_state: list[list[OrderState]] = []
         self.operation_list: list[OperationItem] = []
@@ -306,7 +306,7 @@ class StrategyContext:
                 return money_to_decimal(item.price) + (Decimal(0.5) * Decimal(history_instrument.atr))
 
         if portfolio:
-            self.quantity = quotation_to_decimal(portfolio.quantity)
+            self.quantity = int(quotation_to_decimal(portfolio.quantity))
             self.portfolio_position = portfolio
         else:
             self.quantity = 0

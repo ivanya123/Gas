@@ -490,7 +490,10 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
             raise Exception(f'При отмене заявки произошла ошибка {e}')
 
 
-async def replace_order(connect: 'ConnectTinkoff', context, order_response_id, order_state, price, min_price_increment):
+async def replace_order(connect: 'ConnectTinkoff', context: 'StrategyContext',
+                        order_response_id,
+                        order_state: OrderState,
+                        price, min_price_increment):
     logger.info(f'Цена изменилась, меняем цену ордера на величину {context.history_instrument.atr}')
     new_price = (price + (context.history_instrument.atr / Decimal(2)) if
                  order_state.direction == OrderDirection.ORDER_DIRECTION_BUY
