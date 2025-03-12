@@ -72,7 +72,7 @@ async def subscribe(message: Message):
 async def start(message: Message):
     text = (f"<b>Доступные команды:</b>\n"
             f"/portfolio - информация по портфолио\n"
-            f"/margin - информация по заблокированной сумме"
+            f"/margin - информация по заблокированной сумме\n"
             f"/state_info - информация по состоянию стратегии по инструменту\n\n"
             f"<b>Для оформления подписки на инструмент нужно написать в чате:</b>\n"
             f"Bot_subscribe <b>ИМЯ1 ИМЯ2 ИМЯ3</b>\n"
@@ -87,7 +87,7 @@ async def start(message: Message):
 
 
 @start_router.message(Command('portfolio'))
-async def portfolio():
+async def portfolio(_: Message):
     await conclusion_in_day(connect, bot)
 
 
@@ -109,11 +109,10 @@ async def callback(call_back: CallbackQuery):
     await bot.send_message(chat_id=call_back.message.chat.id, text=text)
 
 
-@start_router.message(F.text == 'margin')
+@start_router.message(Command('margin'))
 async def margin(message: Message):
     result: GetMarginAttributesResponse = await connect.client.users.get_margin_attributes(account_id=ACCOUNT_ID)
     test = '\n'.join(f'{key}: {value}' for key, value in result.__dict__.items())
-    print(test)
     await bot.send_message(chat_id=message.chat.id, text=test, parse_mode=None)
 
 
