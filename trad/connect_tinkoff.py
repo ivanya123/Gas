@@ -84,7 +84,9 @@ class ConnectTinkoff:
             except Exception as e:
                 logger.error(f'Ошибка при получении сообщения: {e}')
                 self.market_data_stream.stop()
-                await asyncio.sleep(5)
+                await self._client.__aexit__(None, None, None)
+                self._client = AsyncClient(self.token)
+                self.client = await self._client.__aenter__()
                 self.market_data_stream = self.client.create_market_data_stream()
                 logger.info(f'Создание нового стрима после ошибки')
 
@@ -262,9 +264,14 @@ class ConnectTinkoff:
         """
         if not self.queue_portfolio:
             self.queue_portfolio = asyncio.Queue()
-        async for operations_response in self.client.operations_stream.positions_stream(
-                accounts=[account_id]):
-            self.queue_portfolio.put_nowait(operations_response)
+        while True:
+            try:
+                async for operations_response in self.client.operations_stream.positions_stream(
+                        accounts=[account_id]):
+                    self.queue_portfolio.put_nowait(operations_response)
+            except Exception as e:
+                logger.error(f'Ошибка при получении сообщения operations: {e}')
+                await asyncio.sleep(10)
 
     async def post_order(self, instrument_id: str, quantity: int, price: Quotation, direction: OrderDirection,
                          account_id: str, order_id: str, order_type: OrderType) -> PostOrderResponse:
@@ -284,12 +291,16 @@ class ConnectTinkoff:
     async def listening_orders(self, account_id: str):
         if not self.queue_order:
             self.queue_order = asyncio.Queue()
-        if self.client:
-            async for order_response in self.client.orders_stream.trades_stream(
-                    accounts=[account_id]
-            ):
-                logger.debug(f'Выполнена заявка {order_response}')
-                self.queue_order.put_nowait(order_response)
+        while True:
+            try:
+                async for order_response in self.client.orders_stream.trades_stream(
+                        accounts=[account_id]
+                ):
+                    logger.debug(f'Выполнена заявка {order_response}')
+                    self.queue_order.put_nowait(order_response)
+            except Exception as e:
+                logger.error(f'Ошибка при получении сообщения orders: {e}')
+                await asyncio.sleep(10)
 
     async def disconnect(self):
         if self.market_data_stream:

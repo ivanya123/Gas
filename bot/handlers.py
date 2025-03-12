@@ -70,19 +70,36 @@ async def subscribe(message: Message):
 
 @start_router.message(CommandStart())
 async def start(message: Message):
+    text = (f"<b>Доступные команды:</b>\n"
+            f"/portfolio - информация по портфолио\n"
+            f"/margin - информация по заблокированной сумме\n\n"
+            f"<b>Для оформления подписки на инструмент нужно написать в чате:</b>\n"
+            f"Bot_subscribe <b>ИМЯ1 ИМЯ2 ИМЯ3</b>\n"
+            f"<b>ИМЯ</b> - ticker инструмента\n"
+            f"Например 'Bot_subscribe IMOEXF' будет оформлена подписка на инструмент IMOEXF\n"
+            f"Если нужно оформить подписку на несколько инструментов, то перечислите их через пробел\n\n"
+            f"Для отмены подписки используйте команду /unsubscribe\n"
+            f"Для обновления информации о позициях используйте команду /update_position\n"
+            f"Она нужна для обновление состояния позиций в базу данных, после какой либо ошибки бота")
     await bot.send_message(chat_id=message.chat.id,
-                           text='При нажатии покажет информацию о позиции',
-                           reply_markup=kb.kb_ticker())
+                           text=text)
 
 
-@start_router.message(F.text == 'Bot_portfolio')
+@start_router.message(Command('portfolio'))
 async def portfolio():
     await conclusion_in_day(connect, bot)
 
 
-@start_router.callback_query(F.data)
+@start_router.message(Command('/state_info'))
+async def state_info(message: Message):
+    await bot.send_message(chat_id=message.chat.id,
+                           text=f'Выберите инструмент по которому хотите получить информацию',
+                           reply_markup=kb.kb_ticker())
+
+
+@start_router.callback_query(F.data.endswith('info'))
 async def callback(call_back: CallbackQuery):
-    context: StrategyContext = get_context_by_figi(call_back.data)
+    context: StrategyContext = get_context_by_figi(call_back.data.split('_')[0])
     dict_info = context.current_position_info()
     text = '\n'.join(
         f'{key}: {value:.2f}' if isinstance(value, (int, float, Decimal)) else f'{key}: {value}' for key, value in
@@ -131,9 +148,9 @@ async def unsubscribe(message: Message):
                            reply_markup=kb.kb_unsubscribe())
 
 
-@start_router.callback_query(F.data)
+@start_router.callback_query(F.data.endswith('unsubscribe'))
 async def unsubscribe_data(call_back: CallbackQuery):
-    key = call_back.data.split('-')[0]
+    key = call_back.data.split('_')[0]
     with shelve.open('data_strategy_state/dict_strategy_state') as db:
         context: 'StrategyContext' = db[key]
         if context.quantity > 0:
@@ -142,4 +159,4 @@ async def unsubscribe_data(call_back: CallbackQuery):
         else:
             del db[key]
             await connect.delete_subscribe(context.history_instrument.instrument_info.uid, last_price=True)
-            await bot.send_message(chat_id=call_back.message.chat.id, text='Отписка от позиции успешно отменена')
+            await bot.send_message(chat_id=call_back.message.chat.id, text='Отписка от инструмента успешно выполнена')
