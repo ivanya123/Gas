@@ -55,7 +55,7 @@ async def subscribe(message: Message):
                     context = StrategyContext(dict_historic[figi])
                     db[figi] = context
 
-        instruments = [instrument.instrument_info for instrument in dict_historic.values()]
+        instruments = [instrument.instrument_info.uid for instrument in dict_historic.values()]
         await connect.add_subscribe_last_price(instruments)
         await connect.add_subscribe_status_instrument(instruments)
         list_task = [connect.figi_to_name(figi) for figi in dict_historic]
