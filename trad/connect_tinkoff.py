@@ -55,6 +55,7 @@ class ConnectTinkoff:
         self.listen: asyncio.Task | None = None
         self.client: AsyncServices | None = None
         self._client: AsyncClient | None = None
+        self.instruments_stream: list[str] = []
 
     async def connection(self):
         """
@@ -85,10 +86,17 @@ class ConnectTinkoff:
                 logger.error(f'Ошибка при получении сообщения: {e}')
                 self.market_data_stream.stop()
                 await self._client.__aexit__(None, None, None)
+                logger.info('Ждем 5 секунд')
+                await asyncio.sleep(5)
+                logger.info(f'Создание нового AsyncClient')
                 self._client = AsyncClient(self.token)
                 self.client = await self._client.__aenter__()
-                self.market_data_stream = self.client.create_market_data_stream()
                 logger.info(f'Создание нового стрима после ошибки')
+                self.market_data_stream = self.client.create_market_data_stream()
+                logger.info(f'Возобновляем подписки')
+                if self.instruments_stream:
+                    await self.add_subscribe_last_price(self.instruments_stream)
+
 
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """
@@ -178,8 +186,13 @@ class ConnectTinkoff:
         instruments: list[LastPriceInstrument] = [LastPriceInstrument(instrument_id=instrument_id) for instrument_id
                                                   in
                                                   instruments]
+        for ins_id in instruments:
+            if ins_id not in self.instruments_stream:
+                self.instruments_stream.append(ins_id)
 
+        logger.info('Оформляем подписки на последние цены')
         self.market_data_stream.last_price.subscribe(instruments=instruments)
+        print(self.instruments_stream)
 
     async def add_subscribe_status_instrument(self, instruments_id: list[str]) -> None:
         """
@@ -206,6 +219,7 @@ class ConnectTinkoff:
 
         instrument_info = InfoInstrument(instrument_id=instrument_id)
         self.market_data_stream.info.unsubscribe(instruments=[instrument_info])
+
         logger.info(f'Подписка на стрим статуса инструмента отменена {instrument_id}')
 
         if not last_price:
@@ -218,6 +232,7 @@ class ConnectTinkoff:
             instrument = LastPriceInstrument(instrument_id=instrument_id)
             self.market_data_stream.last_price.unsubscribe(instruments=[instrument])
             logger.info(f'Подписка на стрим сделок отменена {instrument_id}')
+        self.instruments_stream.remove(instrument_id)
 
     async def info_accounts(self) -> list[PortfolioResponse]:
         """
@@ -254,7 +269,7 @@ class ConnectTinkoff:
         async for portfolio_response in self.client.operations_stream.portfolio_stream(
                 accounts=[account_id]):
             self.queue_portfolio.put_nowait(portfolio_response)
-            logger.debug(f'Получено сообщение о портфеле: {portfolio_response}')
+            logger.info(f'Получено сообщение о портфеле: {portfolio_response}')
 
     async def listening_operations_by_id(self, account_id: str):
         """
