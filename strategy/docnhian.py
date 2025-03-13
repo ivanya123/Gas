@@ -214,7 +214,6 @@ class StrategyContext:
         self.breakout_level_short: Decimal = None
         self.exit_long_donchian: Decimal = None
         self.exit_short_donchian: Decimal = None
-        self.update_data(history_instrument)
 
         self.start_position_date: datetime.datetime = None
         self.long: bool = None
@@ -229,6 +228,8 @@ class StrategyContext:
         self.operation_list: list[OperationItem] = []
         self.state: StrategyState = IdleState()
         self.no_close = None
+
+        self.update_data(history_instrument)
 
     def update_data(self, history_instrument: HistoricInstrument):
         self.history_instrument: HistoricInstrument = history_instrument
