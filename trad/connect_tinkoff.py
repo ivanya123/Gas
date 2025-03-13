@@ -188,7 +188,7 @@ class ConnectTinkoff:
                                                   instruments]
         for ins_id in instruments:
             if ins_id not in self.instruments_stream:
-                self.instruments_stream.append(ins_id)
+                self.instruments_stream.append(ins_id.instrument_id)
 
         logger.info('Оформляем подписки на последние цены')
         self.market_data_stream.last_price.subscribe(instruments=instruments)
