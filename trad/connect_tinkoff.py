@@ -97,7 +97,6 @@ class ConnectTinkoff:
                 if self.instruments_stream:
                     await self.add_subscribe_last_price(self.instruments_stream)
 
-
     async def get_candles_from_ticker(self, ticker: str, interval: str) -> tuple[list[HistoricCandle], Future]:
         """
         Получение свечей по тикету
