@@ -114,10 +114,11 @@ def create_folder_and_save_historic_instruments(historic_instruments: HistoricIn
     Создаёт папку с историческими данными и сохраняет в нее данныe.
     :param historic_instruments: Данные для сохранения.
     """
-
+    if not os.path.exists('my_data_folder'):
+        os.mkdir('my_data_folder')
     if not os.path.exists(historic_instruments.instrument_info.name):
         os.mkdir(historic_instruments.instrument_info.name)
-    path = os.path.join(historic_instruments.instrument_info.name,
+    path = os.path.join('my_data_folder', historic_instruments.instrument_info.name,
                         historic_instruments.instrument_info.figi)
     historic_instruments.create_donchian_canal(20, 10)
     historic_instruments.save_to_csv(
