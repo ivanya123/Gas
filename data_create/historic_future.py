@@ -41,7 +41,7 @@ class HistoricInstrument:
         self.time_last_candle: HistoricCandle = self.data.iloc[-1]['time']
         self.tick_size: Decimal = quotation_to_decimal(self.instrument_info.min_price_increment)
         self.tick_size_rub: Decimal = quotation_to_decimal(self.instrument_info.min_price_increment_amount)
-        self.atr = self.create_atr()
+        self.atr = self.create_atr(20)
         self.create_donchian_canal(20, 10)
 
     def create_atr(self, n=14) -> Decimal:
