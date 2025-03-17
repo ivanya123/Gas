@@ -118,7 +118,7 @@ def create_folder_and_save_historic_instruments(historic_instruments: HistoricIn
         os.mkdir('my_data_folder')
     src = os.path.join('my_data_folder', historic_instruments.instrument_info.name)
     if not os.path.exists(src):
-        os.mkdir(historic_instruments.instrument_info.name)
+        os.mkdir(src)
     path = os.path.join('my_data_folder', historic_instruments.instrument_info.name,
                         historic_instruments.instrument_info.figi)
     historic_instruments.create_donchian_canal(20, 10)
