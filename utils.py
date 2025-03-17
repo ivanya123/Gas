@@ -116,7 +116,8 @@ def create_folder_and_save_historic_instruments(historic_instruments: HistoricIn
     """
     if not os.path.exists('my_data_folder'):
         os.mkdir('my_data_folder')
-    if not os.path.exists(historic_instruments.instrument_info.name):
+    src = os.path.join('my_data_folder', historic_instruments.instrument_info.name)
+    if not os.path.exists(src):
         os.mkdir(historic_instruments.instrument_info.name)
     path = os.path.join('my_data_folder', historic_instruments.instrument_info.name,
                         historic_instruments.instrument_info.figi)
