@@ -381,17 +381,23 @@ async def place_order_with_status_check(connect: ConnectTinkoff,
 
 
 async def order_for_close_position(context: 'StrategyContext', connect: ConnectTinkoff,
-                                   price: Decimal, count: int = 100,
-                                   retry_interval=10) -> Optional[list[OrderState]]:
+                                   price: Decimal, count: int = 300,
+                                   retry_interval=20) -> Optional[list[OrderState]]:
     logger.info(f'Закрытие позиции {context.history_instrument.instrument_info.name} по цене {price}')
     order_id = ut.generate_order_id()
     min_price_increment = quotation_to_decimal(context.history_instrument.instrument_info.min_price_increment)
     logger.info(f"Тип цены {price} - {type(price)}")
     price = (price // min_price_increment) * min_price_increment
     logger.info(f"Тип цены {price} - {type(price)}")
+
+    if context.position_units > 1:
+        quantity_for_one_units = context.quantity // context.position_units
+    else:
+        quantity_for_one_units = context.quantity
+
     order_params = {
         'instrument_id': context.history_instrument.instrument_info.uid,
-        'quantity': int(context.quantity),
+        'quantity': int(quantity_for_one_units),
         'price': decimal_to_quotation(price),
         'direction': context.close_direction,
         'account_id': ACCOUNT_ID,
@@ -405,7 +411,9 @@ async def order_for_close_position(context: 'StrategyContext', connect: ConnectT
     list_order_state = []
     order_state = None
     await asyncio.sleep(retry_interval)
-    for _ in range(count):
+    for i in range(count):
+        logger.info(f'Ждем подтверждения ордера для закрытия позиции {count}({i}) '
+                    f'раз с интервалом {retry_interval} сек.')
         try:
             order_state = await connect.client.orders.get_order_state(order_id=order_response_id,
                                                                       account_id=ACCOUNT_ID)

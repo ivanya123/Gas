@@ -16,11 +16,14 @@ from trad.connect_tinkoff import ConnectTinkoff
 
 if __name__ == '__main__':
 
-    with open('logs.log', 'r') as f:
-        for line in f.readlines():
-            if 'Ошибка при получении сообщения:' in line:
-                print(line)
+    with shelve.open(r'C:\Users\aples\PycharmProjects\Gas\data_strategy_state\dict_strategy_state') as db:
+        for key in db:
+            fake_context: StrategyContext = db[key]
+            break
 
+    print(fake_context.history_instrument.instrument_info.name)
+    print(fake_context.breakout_level_long)
+    print(fake_context.breakout_level_short)
 
 
 

@@ -1,8 +1,11 @@
+import shelve
 from decimal import Decimal
 
 import tinkoff.invest as ti
 from tinkoff.invest import _grpc_helpers
 from tinkoff.invest.utils import quotation_to_decimal, decimal_to_quotation, money_to_decimal
+
+from strategy.docnhian import StrategyContext
 
 
 class FakeAsyncServices:
@@ -78,8 +81,10 @@ if __name__ == '__main__':
         execution_report_status=ti.OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL,
     )
 
-    for key, value in small_order_state.__dict__.items():
-        if not issubclass(value.__class__, object):
-            small_order_state.__dict__[key] = None
+    with shelve.open(r'C:\Users\aples\PycharmProjects\Gas\data_strategy_state\dict_strategy_state') as db:
+        for key in db.keys():
+            fake_context: StrategyContext = db[key]
+            break
 
-    print(small_order_state)
+    with shelve.open(r'data_test/database_test') as db:
+        db['context'] = fake_context

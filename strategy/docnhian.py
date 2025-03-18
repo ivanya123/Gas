@@ -21,7 +21,14 @@ logger = logging.getLogger(__name__)
 
 def update_strategy_context(my_context: 'StrategyContext',
                             result: list[OrderState],
-                            long: bool):
+                            long: bool) -> None:
+    """
+    Обновление контекста стратегии в зависимости от состояния.
+    :param my_context: Контекст состояния стратегии.
+    :param result: Набор ответов по выполненным заявкам.
+    :param long: Флаг покупки или продажи (False – продажа, True – покупка).
+    :return: None
+    """
     entry_price = Decimal(sum(money_to_decimal(x.average_position_price) for x in result) / len(result))
     min_increment_amount = quotation_to_decimal(
         my_context.history_instrument.instrument_info.min_price_increment_amount)
@@ -116,10 +123,19 @@ def close_context(context: 'StrategyContext') -> None:
     context.no_close = None
 
 
+def close_one_unit(context: 'StrategyContext', result: list[OrderState]) -> None:
+    if context.position_units > 1:
+        context.position_units -= 1
+        context.stop_levels.pop()
+        context.entry_prices.pop()
+        context.order_state.pop()
+        context.quantity -= int(sum(x.lots_executed for x in result))
+
+
 # Состояние "Открытая сделка" – позиция открыта, можно добавлять юниты или закрывать сделку.
 class TradeOpenState(StrategyState):
 
-    async def on_new_price(self, context: 'StrategyContext', price: float, connect: ConnectTinkoff):
+    async def on_new_price(self, context: 'StrategyContext', price: Decimal, connect: ConnectTinkoff):
         last_entry: Decimal = context.entry_prices[-1]
 
         # Проверяем условие для увеличения позиции на лонг.
@@ -164,16 +180,25 @@ class TradeOpenState(StrategyState):
                 if not result[-1]:
                     logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
                                 f'закрыта не полностью')
-                    try:
-                        context.quantity = context.quantity - int(sum(x.lots_executed for x in result[:-1]))
-                    except IndexError:
-                        context.quantity = 0
+
+                    if context.position_units > 1:
+                        close_one_unit(context, result[:-1])
+                        logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                    f'новое количество лотов {context.quantity}')
+
                     context.no_close = True
                     return True
                 else:
-                    logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
-                                f'закрыта')
-                    close_context(context)
+                    if context.position_units > 1:
+                        logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                    f'закрыта на один юнит')
+                        logger.info(f'Инструмент {context.history_instrument.instrument_info.name} '
+                                    f'новое количество лотов{context.quantity}')
+                        close_one_unit(context, result)
+                    else:
+                        logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                    f'закрыта')
+                        close_context(context)
                     return True
             except Exception as e:
                 logger.error(f'При закрытии позиции по {context.history_instrument.instrument_info.name} '
@@ -190,14 +215,24 @@ class TradeOpenState(StrategyState):
                 if not result[-1]:
                     logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
                                 f'закрыта не полностью')
-                    try:
-                        context.quantity = context.quantity - int(sum(x.lots_executed for x in result[:-1]))
-                    except IndexError:
-                        context.quantity = 0
+
+                    if context.position_units > 1:
+                        close_one_unit(context, result[:-1])
+                        logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                    f'новое количество лотов {context.quantity}')
                     context.no_close = True
                     return True
                 else:
-                    close_context(context)
+                    if context.position_units > 1:
+                        logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                    f'закрыта на один юнит')
+                        logger.info(f'Инструмент {context.history_instrument.instrument_info.name} '
+                                    f'новое количество лотов{context.quantity}')
+                        close_one_unit(context, result)
+                    else:
+                        logger.info(f'Позиция по {context.history_instrument.instrument_info.name} '
+                                    f'закрыта')
+                        close_context(context)
                     return True
             except Exception as e:
                 logger.error(f'При закрытии позиции по {context.history_instrument.instrument_info.name} '
