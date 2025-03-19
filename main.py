@@ -1,9 +1,13 @@
 import asyncio
+import os
+
 from bot.telegram_bot import bot, dp, scheduler
 from bot.handlers import start_router, connect
-from config import CHAT_ID
+
 from trad.task_all_time import update_data, start_bot, processing_stream, conclusion_in_day, \
     processing_stream_portfolio, processing_trades_stream
+
+CHAT_ID = os.getenv('CHAT_ID')
 
 
 async def main():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shelve
 from decimal import Decimal
 from typing import Optional
@@ -14,12 +15,15 @@ from tinkoff.invest import MarketDataResponse, PortfolioStreamResponse, Position
 from tinkoff.invest.utils import quotation_to_decimal, money_to_decimal, decimal_to_quotation
 
 import utils as ut
-from config import CHAT_ID, ACCOUNT_ID
+
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
 
 if TYPE_CHECKING:
     from strategy.docnhian import StrategyContext
+
+CHAT_ID = os.getenv('CHAT_ID')
+ACCOUNT_ID = os.getenv('ACCOUNT_ID')
 
 dict_status_instrument = {}
 global_info_dict = {}

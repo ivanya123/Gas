@@ -1,14 +1,16 @@
 import logging
+import os
 from logging.handlers import RotatingFileHandler
-
+from dotenv import load_dotenv
+load_dotenv()
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import TOKEN_TELEGRAM
-
+TOKEN_TELEGRAM = os.getenv('TOKEN_TELEGRAM')
+print(TOKEN_TELEGRAM)
 scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
 
 FORMAT = '[%(asctime)s:%(name)s-%(funcName)s-%(lineno)d:%(levelname)s] - %(message)s'

@@ -1,0 +1,6 @@
+/.venv
+/.idea
+/tests
+debugging.py
+config.py
+pytest.ini

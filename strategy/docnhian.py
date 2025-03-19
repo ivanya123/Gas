@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 import datetime
 import logging
+import os
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -11,13 +12,14 @@ from tinkoff.invest import OrderState, OrderDirection, GetOperationsByCursorRequ
     GetOperationsByCursorResponse, PortfolioPosition, OperationItem
 from tinkoff.invest.utils import money_to_decimal, now, quotation_to_decimal
 
-from config import ACCOUNT_ID
+
 from data_create.historic_future import HistoricInstrument
 from trad.connect_tinkoff import ConnectTinkoff
 from trad.task_all_time import place_order_with_status_check, order_for_close_position
 
 logger = logging.getLogger(__name__)
-
+ACCOUNT_ID = os.getenv('ACCOUNT_ID')
+print(ACCOUNT_ID)
 
 def update_strategy_context(my_context: 'StrategyContext',
                             result: list[OrderState],

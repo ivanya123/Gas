@@ -1,4 +1,5 @@
 import asyncio
+import os
 import shelve
 from decimal import Decimal
 
@@ -10,7 +11,10 @@ from tinkoff.invest import GetMarginAttributesResponse
 import bot.keyboard as kb
 import utils as ut
 from bot.telegram_bot import bot
-from config import TOKEN_TEST, ACCOUNT_ID
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from data_create.historic_future import HistoricInstrument
 from strategy.docnhian import StrategyContext
 from trad.connect_tinkoff import ConnectTinkoff
@@ -19,6 +23,8 @@ from trad.task_all_time import conclusion_in_day, get_context_by_figi
 start_router = Router()
 dict_function = {}
 dict_instruments = {}
+TOKEN_TEST = os.getenv('TOKEN_TEST')
+ACCOUNT_ID = os.getenv('ACCOUNT_ID')
 connect = ConnectTinkoff(TOKEN_TEST)
 event_stop_stream_to_chat = asyncio.Event()
 

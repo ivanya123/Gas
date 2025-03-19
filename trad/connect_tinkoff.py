@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 
 from async_lru import alru_cache
 from tinkoff.invest import (
@@ -14,7 +15,7 @@ from tinkoff.invest import (
     OrderType, PostOrderResponse)
 from tinkoff.invest.async_services import AsyncServices
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
-from config import ACCOUNT_ID
+ACCOUNT_ID = os.getenv('ACCOUNT_ID')
 
 logger = logging.getLogger(__name__)
 
@@ -325,13 +326,5 @@ class ConnectTinkoff:
 
 
 if __name__ == '__main__':
-    from config import TOKEN, ACCOUNT_ID
 
-    connect = ConnectTinkoff(TOKEN)
-
-
-    async def main():
-        pass
-
-
-    asyncio.run(main())
+    pass
